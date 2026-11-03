@@ -30,7 +30,15 @@ jobs:
         run: |
           if [ ! -d "android" ]; then
             echo "Generating Android platform files..."
+            # Сохраняем исходники lib во временную папку
+            cp -r lib /tmp/lib_backup
             flutter create . --project-name=rockarea --platforms=android --org=com.div1kik.rockarea --overwrite
+            # Восстанавливаем наш настоящий lib/main.dart
+            rm -rf lib
+            cp -r /tmp/lib_backup lib
+            # Устанавливаем minSdkVersion 21 для работы модуля камеры
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle || true
           fi
 
       - name: Install dependencies
