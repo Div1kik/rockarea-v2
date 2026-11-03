@@ -126,4 +126,21 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
               painter: _PolygonPainter(
                 points: _points,
                 activeIndex: _activePointIndex,
-                nodeRadius:
+                nodeRadius: _nodeRadius,
+              ),
+              size: Size.infinite,
+            ),
+          ),
+          if (_currentTouch != null && _activePointIndex != -1)
+            Positioned(
+              left: (_currentTouch!.dx - 45).clamp(10, MediaQuery.of(context).size.width - 100),
+              top: (_currentTouch!.dy - 120).clamp(10, MediaQuery.of(context).size.height - 100),
+              child: Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF10B981), width: 2.5),
+                  color: Colors.black.withOpacity(0.65),
+                ),
+                child:
