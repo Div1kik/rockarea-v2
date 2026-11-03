@@ -26,22 +26,22 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate Android Scaffolding if missing
+      - name: Generate Android Scaffolding safely
         run: |
           if [ ! -d "android" ]; then
-            echo "Generating Android platform files..."
-            cp -r lib /tmp/lib_backup
-            flutter create . --project-name=rockarea --platforms=android --org=com.div1kik.rockarea --overwrite
-            rm -rf lib
-            cp -r /tmp/lib_backup lib
+            echo "Generating clean Android platform folder..."
+            # Генерируем каркас во временной папке, чтобы не задеть файлы репозитория
+            flutter create /tmp/dummy_scaffold --project-name=rockarea --platforms=android --org=com.div1kik.rockarea
+            cp -r /tmp/dummy_scaffold/android ./android
+            rm -rf /tmp/dummy_scaffold
+
+            # Устанавливаем minSdkVersion 21
             find android -name "build.gradle*" -exec sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' {} +
             find android -name "build.gradle*" -exec sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' {} +
           fi
 
       - name: Install dependencies
-        run: |
-          flutter clean
-          flutter pub get
+        run: flutter pub get
 
       - name: Build APK (Debug)
         run: flutter build apk --debug
