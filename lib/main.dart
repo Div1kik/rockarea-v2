@@ -10,7 +10,7 @@ Future<void> main() async {
   try {
     _cameras = await availableCameras();
   } catch (e) {
-    debugPrint('Ошибка инициализации камер: $e');
+    debugPrint('Ошибка инициализации списка камер: $e');
   }
   runApp(const RockAreaApp());
 }
