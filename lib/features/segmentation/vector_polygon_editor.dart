@@ -97,12 +97,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F19),
       appBar: AppBar(
-        title: const Text('Разметка контура', style: TextStyle(fontSize: 16)),
+        title: const Text('Разметка контура керна', style: TextStyle(fontSize: 16)),
         backgroundColor: const Color(0xFF131C2E),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'Сбросить контур',
+            tooltip: 'Сбросить полигон',
             onPressed: _initDefaultPolygon,
           ),
         ],
@@ -113,7 +113,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
           Positioned.fill(
             child: Image.file(
               File(widget.imagePath),
-              fit: BoxFit.cover,
+              fit: BoxFit.contain,
             ),
           ),
           GestureDetector(
@@ -143,4 +143,100 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                   border: Border.all(color: const Color(0xFF10B981), width: 2.5),
                   color: Colors.black.withOpacity(0.65),
                 ),
-                child:
+                child: const Center(
+                  child: Icon(Icons.gps_fixed, color: Color(0xFF10B981), size: 28),
+                ),
+              ),
+            ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF131C2E).withOpacity(0.92),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Площадь (Shoelace)', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                      Text('${pixelArea.toStringAsFixed(0)} px²',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ],
+                  ),
+                  Text('Узлов: ${_points.length}\n(тап — добавить, зажать — убрать)',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PolygonPainter extends CustomPainter {
+  final List<Offset> points;
+  final int activeIndex;
+  final double nodeRadius;
+
+  _PolygonPainter({
+    required this.points,
+    required this.activeIndex,
+    required this.nodeRadius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 3) return;
+
+    final fillPaint = Paint()
+      ..color = const Color(0xFF10B981).withOpacity(0.32)
+      ..style = PaintingStyle.fill;
+
+    final strokePaint = Paint()
+      ..color = const Color(0xFF10B981)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (int i = 1; i < points.length; i++) {
+      path.lineTo(points[i].dx, points[i].dy);
+    }
+    path.close();
+
+    canvas.drawPath(path, fillPaint);
+    canvas.drawPath(path, strokePaint);
+
+    final nodePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    final activeNodePaint = Paint()
+      ..color = const Color(0xFFF59E0B)
+      ..style = PaintingStyle.fill;
+
+    final nodeBorder = Paint()
+      ..color = const Color(0xFF10B981)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    for (int i = 0; i < points.length; i++) {
+      final isCurrent = (i == activeIndex);
+      canvas.drawCircle(points[i], isCurrent ? nodeRadius * 1.5 : nodeRadius, isCurrent ? activeNodePaint : nodePaint);
+      canvas.drawCircle(points[i], isCurrent ? nodeRadius * 1.5 : nodeRadius, nodeBorder);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PolygonPainter oldDelegate) => true;
+}
