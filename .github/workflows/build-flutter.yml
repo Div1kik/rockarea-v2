@@ -30,7 +30,7 @@ jobs:
         run: |
           if [ ! -d "android" ]; then
             echo "Generating Android platform files..."
-            flutter create . --platforms=android --org=com.div1kik.rockarea --overwrite
+            flutter create . --project-name=rockarea --platforms=android --org=com.div1kik.rockarea --overwrite
           fi
 
       - name: Install dependencies
