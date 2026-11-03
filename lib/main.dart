@@ -1,17 +1,9 @@
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:image_picker/image_picker.dart';
 import 'features/segmentation/vector_polygon_editor.dart';
 
-List<CameraDescription> _cameras = [];
-
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    _cameras = await availableCameras();
-  } catch (e) {
-    debugPrint('Ошибка инициализации списка камер: $e');
-  }
   runApp(const RockAreaApp());
 }
 
@@ -32,152 +24,120 @@ class RockAreaApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const CameraCaptureScreen(),
+      home: const MainCaptureScreen(),
     );
   }
 }
 
-class CameraCaptureScreen extends StatefulWidget {
-  const CameraCaptureScreen({super.key});
+class MainCaptureScreen extends StatefulWidget {
+  const MainCaptureScreen({super.key});
 
   @override
-  State<CameraCaptureScreen> createState() => _CameraCaptureScreenState();
+  State<MainCaptureScreen> createState() => _MainCaptureScreenState();
 }
 
-class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsBindingObserver {
-  CameraController? _controller;
-  bool _isInitialized = false;
-  bool _isCapturing = false;
+class _MainCaptureScreenState extends State<MainCaptureScreen> {
+  final ImagePicker _picker = ImagePicker();
+  bool _isLoading = false;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _requestPermissionAndInit();
-  }
-
-  Future<void> _requestPermissionAndInit() async {
-    final status = await Permission.camera.request();
-    if (!mounted) return;
-
-    if (status.isGranted && _cameras.isNotEmpty) {
-      final camera = _cameras.firstWhere(
-        (cam) => cam.lensDirection == CameraLensDirection.back,
-        orElse: () => _cameras.first,
-      );
-
-      final controller = CameraController(
-        camera,
-        ResolutionPreset.high,
-        enableAudio: false,
-      );
-
-      try {
-        await controller.initialize();
-        if (!mounted) {
-          await controller.dispose();
-          return;
-        }
-        setState(() {
-          _controller = controller;
-          _isInitialized = true;
-        });
-      } catch (e) {
-        debugPrint('Ошибка запуска камеры: $e');
-      }
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    final CameraController? cameraController = _controller;
-    if (cameraController == null || !cameraController.value.isInitialized) return;
-
-    if (state == AppLifecycleState.inactive) {
-      cameraController.dispose();
-      setState(() => _isInitialized = false);
-    } else if (state == AppLifecycleState.resumed) {
-      _requestPermissionAndInit();
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _capturePhoto() async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized || _isCapturing) return;
-
-    setState(() => _isCapturing = true);
+  Future<void> _pickImage(ImageSource source) async {
+    setState(() => _isLoading = true);
     try {
-      final XFile photo = await controller.takePicture();
-      if (!mounted) return;
-
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => VectorPolygonEditor(imagePath: photo.path),
-        ),
+      final XFile? photo = await _picker.pickImage(
+        source: source,
+        imageQuality: 100,
       );
+
+      if (photo != null && mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VectorPolygonEditor(imagePath: photo.path),
+          ),
+        );
+      }
     } catch (e) {
-      debugPrint('Ошибка захвата кадра: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка захвата: $e')),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isCapturing = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_isInitialized || _controller == null) {
-      return const Scaffold(
-        body: Center(
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('RockArea v2 — Лаборатория', style: TextStyle(fontSize: 16)),
+        backgroundColor: const Color(0xFF131C2E),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Color(0xFF10B981)),
-              SizedBox(height: 16),
-              Text('Инициализация видоискателя...', style: TextStyle(color: Color(0xFF94A3B8))),
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF10B981).withOpacity(0.15),
+                  border: Border.all(color: const Color(0xFF10B981), width: 2),
+                ),
+                child: const Icon(Icons.analytics_outlined, size: 48, color: Color(0xFF10B981)),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Планиметрия сечения керна',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Сделайте снимок торца образца скальной породы для векторной сегментации контура',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+              ),
+              const SizedBox(height: 40),
+              if (_isLoading)
+                const CircularProgressIndicator(color: Color(0xFF10B981))
+              else ...[
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.camera_alt),
+                    label: const Text('Сделать снимок камеры', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => _pickImage(ImageSource.camera),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF94A3B8),
+                      side: const BorderSide(color: Color(0xFF334155)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.photo_library),
+                    label: const Text('Выбрать образец из галереи'),
+                    onPressed: () => _pickImage(ImageSource.gallery),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('RockArea v2 — Камера', style: TextStyle(fontSize: 16)),
-        backgroundColor: const Color(0xFF131C2E),
-      ),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          CameraPreview(_controller!),
-          Positioned(
-            bottom: 36,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: _isCapturing ? null : _capturePhoto,
-                child: Container(
-                  width: 74,
-                  height: 74,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 4),
-                    color: _isCapturing ? Colors.grey : const Color(0xFF10B981),
-                  ),
-                  child: _isCapturing
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Icon(Icons.camera_alt, color: Colors.white, size: 36),
-                ),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
