@@ -23,7 +23,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   bool _isProcessing = false;
 
   final double _pixelsPerCm2 = 1400.0;
-  static const double _hitRadius = 44.0; // Широкая зона захвата для пальца
+  static const double _hitRadius = 44.0;
   static const double _nodeRadius = 7.0;
 
   @override
@@ -47,7 +47,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     final dxOffset = (constraints.maxWidth - canvasSize.width) / 2;
     final dyOffset = (constraints.maxHeight - canvasSize.height) / 2;
 
-    // Переводим координату экрана в пространство холста фотографии
     final localX = touch.dx - dxOffset;
     final localY = touch.dy - dyOffset;
     final localTouch = Offset(localX, localY);
@@ -56,7 +55,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       return;
     }
 
-    // 1. Приоритет: проверяем попадание в узел активного полигона
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
       final hitIndex = PolygonMath.findNearestPoint(localTouch, poly.points, _hitRadius);
@@ -69,7 +67,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 2. Проверяем выбор другого существующего полигона
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(localTouch, _polygons[i].points)) {
         setState(() {
@@ -80,7 +77,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 3. Если тап в пустое место — автодетектируем новый образец
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(localTouch, canvasSize);
     }
@@ -273,7 +269,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // Точное сохранение пропорций кадра без растяжения
                     Center(
                       child: SizedBox(
                         width: canvasSize.width,
@@ -296,7 +291,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       ),
                     ),
 
-                    // Сенсорный слой для обработки жестов
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTapDown: (details) => _handleTapOrDragStart(details.localPosition, constraints, imgAspect),
@@ -305,7 +299,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       onPanEnd: _onPanEnd,
                     ),
 
-                    // Экранная лупа над пальцем при перемещении узла
                     if (_currentTouch != null && _activePointIndex != -1)
                       Positioned(
                         left: (_currentTouch!.dx - 45).clamp(10.0, constraints.maxWidth - 100.0),
@@ -316,8 +309,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(color: const Color(0xFF10B981), width: 2.5),
-                            color: Colors.black.withOpacity(0.75),
-                            boxShadow: const [BoxShadow(color: Colors.black88, blurRadius: 8)],
+                            color: const Color(0xCC000000),
+                            boxShadow: const [
+                              BoxShadow(color: Color(0x99000000), blurRadius: 8),
+                            ],
                           ),
                           child: const Center(
                             child: Icon(Icons.gps_fixed, color: Color(0xFF10B981), size: 30),
@@ -334,7 +329,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ),
               ),
 
-              // Нижняя панель
               Container(
                 height: 220,
                 decoration: const BoxDecoration(
