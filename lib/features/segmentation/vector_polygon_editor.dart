@@ -17,14 +17,14 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   final List<SamplePolygon> _polygons = [];
   int _activePolygonIndex = -1;
   int _activePointIndex = -1;
-  Offset? _currentTouch;
+  Offset? _dragPosition;
 
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
   final double _pixelsPerCm2 = 1400.0;
-  static const double _hitRadius = 40.0;
-  static const double _nodeRadius = 7.0;
+  static const double _hitRadius = 48.0; // Сверхнадежный захват для пальца
+  static const double _nodeRadius = 7.5;
 
   @override
   void initState() {
@@ -42,27 +42,25 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
   }
 
-  void _onImageTapOrDragStart(Offset localPos, Size canvasSize) {
-    if (localPos.dx < 0 || localPos.dx > canvasSize.width || localPos.dy < 0 || localPos.dy > canvasSize.height) {
-      return;
-    }
+  void _onTapDown(TapDownDetails details, Size canvasSize) {
+    final touch = details.localPosition;
 
-    // 1. Проверяем захват узла активного образца
+    // 1. Проверяем выбор существующего узла
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
-      final hitIndex = PolygonMath.findNearestPoint(localPos, poly.points, _hitRadius);
+      final hitIndex = PolygonMath.findNearestPoint(touch, poly.points, _hitRadius);
       if (hitIndex != -1) {
         setState(() {
           _activePointIndex = hitIndex;
-          _currentTouch = localPos;
+          _dragPosition = touch;
         });
         return;
       }
     }
 
-    // 2. Проверяем выбор другого образца
+    // 2. Проверяем выбор другого полигона
     for (int i = _polygons.length - 1; i >= 0; i--) {
-      if (PolygonMath.isPointInside(localPos, _polygons[i].points)) {
+      if (PolygonMath.isPointInside(touch, _polygons[i].points)) {
         setState(() {
           _activePolygonIndex = i;
           _activePointIndex = -1;
@@ -71,17 +69,17 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 3. Тап в свободное место — детектируем новый образец
+    // 3. Тап в свободное место — запускаем автодетекцию
     if (_decodedImage != null && !_isProcessing) {
-      _autoDetectObjectAt(localPos, canvasSize);
+      _autoDetectObjectAt(touch, canvasSize);
     }
   }
 
-  void _autoDetectObjectAt(Offset localTouch, Size canvasSize) {
+  void _autoDetectObjectAt(Offset touch, Size canvasSize) {
     setState(() => _isProcessing = true);
 
-    final normX = localTouch.dx / canvasSize.width;
-    final normY = localTouch.dy / canvasSize.height;
+    final normX = (touch.dx / canvasSize.width).clamp(0.0, 1.0);
+    final normY = (touch.dy / canvasSize.height).clamp(0.0, 1.0);
 
     final detectedNormPoints = ContourDetector.extractContourAroundPoint(
       image: _decodedImage!,
@@ -106,7 +104,21 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     });
   }
 
-  void _onImagePanUpdate(DragUpdateDetails details, Size canvasSize) {
+  void _onPanStart(DragStartDetails details, Size canvasSize) {
+    final touch = details.localPosition;
+    if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
+      final poly = _polygons[_activePolygonIndex];
+      final hitIndex = PolygonMath.findNearestPoint(touch, poly.points, _hitRadius);
+      if (hitIndex != -1) {
+        setState(() {
+          _activePointIndex = hitIndex;
+          _dragPosition = touch;
+        });
+      }
+    }
+  }
+
+  void _onPanUpdate(DragUpdateDetails details, Size canvasSize) {
     if (_activePolygonIndex != -1 && _activePointIndex != -1) {
       final clampedPos = Offset(
         details.localPosition.dx.clamp(0.0, canvasSize.width),
@@ -115,15 +127,15 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
       setState(() {
         _polygons[_activePolygonIndex].points[_activePointIndex] = clampedPos;
-        _currentTouch = clampedPos;
+        _dragPosition = clampedPos;
       });
     }
   }
 
-  void _onImagePanEnd(DragEndDetails details) {
+  void _onPanEnd(DragEndDetails details) {
     setState(() {
       _activePointIndex = -1;
-      _currentTouch = null;
+      _dragPosition = null;
     });
   }
 
@@ -218,7 +230,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text('Планиметрия керна', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
         backgroundColor: Colors.white,
@@ -227,7 +239,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         actions: [
           IconButton(
             icon: const Icon(Icons.bookmark_add, color: Color(0xFFF97316)),
-            tooltip: 'Сохранить в архив',
+            tooltip: 'Сохранить в журнал',
             onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
           ),
           IconButton(
@@ -237,6 +249,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ? () => setState(() {
                       _polygons.removeAt(_activePolygonIndex);
                       _activePolygonIndex = _polygons.isNotEmpty ? _polygons.length - 1 : -1;
+                      _activePointIndex = -1;
                     })
                 : null,
           ),
@@ -259,9 +272,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
+                        // Изображение
                         Positioned.fill(
                           child: Image.file(File(widget.imagePath), fit: BoxFit.fill),
                         ),
+
+                        // Векторные полигоны
                         Positioned.fill(
                           child: CustomPaint(
                             painter: _MultiPolygonPainter(
@@ -272,35 +288,38 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             ),
                           ),
                         ),
+
+                        // Сенсорный слой
                         Positioned.fill(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
-                            onTapDown: (details) => _onImageTapOrDragStart(details.localPosition, canvasSize),
-                            onPanStart: (details) => _onImageTapOrDragStart(details.localPosition, canvasSize),
-                            onPanUpdate: (details) => _onImagePanUpdate(details, canvasSize),
-                            onPanEnd: _onImagePanEnd,
+                            onTapDown: (details) => _onTapDown(details, canvasSize),
+                            onPanStart: (details) => _onPanStart(details, canvasSize),
+                            onPanUpdate: (details) => _onPanUpdate(details, canvasSize),
+                            onPanEnd: _onPanEnd,
                           ),
                         ),
-                        if (_currentTouch != null && _activePointIndex != -1)
+
+                        // Аппаратная экранная лупа с реальным 2x увеличением картинки под пальцем
+                        if (_dragPosition != null && _activePointIndex != -1)
                           Positioned(
-                            left: (_currentTouch!.dx - 45).clamp(0.0, canvasSize.width - 90.0),
-                            top: (_currentTouch!.dy - 105).clamp(0.0, canvasSize.height - 90.0),
-                            child: Container(
-                              width: 90,
-                              height: 90,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: const Color(0xFFF97316), width: 3),
-                                color: Colors.white.withOpacity(0.92),
-                                boxShadow: const [
-                                  BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, 4)),
+                            left: _dragPosition!.dx - 55,
+                            top: _dragPosition!.dy - 125,
+                            child: RawMagnifier(
+                              decoration: const MagnifierDecoration(
+                                shape: CircleBorder(
+                                  side: BorderSide(color: Color(0xFFF97316), width: 3),
+                                ),
+                                shadow: [
+                                  BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 4)),
                                 ],
                               ),
-                              child: const Center(
-                                child: Icon(Icons.gps_fixed, color: Color(0xFFF97316), size: 32),
-                              ),
+                              size: const Size(110, 110),
+                              magnificationScale: 2.2,
+                              focalPointOffset: const Offset(0, 70),
                             ),
                           ),
+
                         if (_isProcessing)
                           Container(
                             color: Colors.black26,
@@ -312,9 +331,9 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ),
               ),
 
-              // Нижняя панель в чистом светлом стиле
+              // Нижняя сводная таблица
               Container(
-                height: 230,
+                height: 220,
                 decoration: const BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -441,7 +460,6 @@ class _MultiPolygonPainter extends CustomPainter {
 
       final bool isSelected = (p == activeIndex);
 
-      // Оранжевая маска с тонким технологичным синим контуром
       final fillPaint = Paint()
         ..color = (isSelected ? const Color(0xFFF97316) : const Color(0xFF94A3B8)).withOpacity(0.35)
         ..style = PaintingStyle.fill;
