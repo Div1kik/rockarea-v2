@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 class ContourDetector {
-  /// Высокоточный локальный сегментатор по цветовому контрасту (Delta-E)
+  /// Высокоточный локальный сегментатор границ по цветовому перепаду
   static List<Offset> extractContourAroundPoint({
     required img.Image image,
     required double normX,
@@ -25,7 +25,7 @@ class ContourDetector {
     final int w = small.width;
     final int h = small.height;
 
-    // Усредняем эталонный цвет образца в точке тапа (ядро 5x5)
+    // Считываем опорный цвет образца в точке касания
     double rSum = 0, gSum = 0, bSum = 0;
     int samples = 0;
     for (int dy = -2; dy <= 2; dy++) {
@@ -43,8 +43,7 @@ class ContourDetector {
     final double seedG = gSum / samples;
     final double seedB = bSum / samples;
 
-    // Допустимый цветовой порог расхождения (отсекает фон подложки и бумагу)
-    const double colorTolerance = 48.0;
+    const double colorTolerance = 55.0;
 
     final Uint8List mask = Uint8List(w * h);
     final List<int> queue = <int>[];
@@ -54,10 +53,10 @@ class ContourDetector {
     mask[startIdx] = 1;
 
     final List<math.Point<int>> objectPixels = [];
-    final int maxRadius = (math.min(w, h) * 0.40).toInt();
+    final int maxRadius = (math.min(w, h) * 0.45).toInt();
 
     int iterations = 0;
-    while (queue.isNotEmpty && iterations < 45000) {
+    while (queue.isNotEmpty && iterations < 50000) {
       iterations++;
       final int idx = queue.removeLast();
       final int cx = idx % w;
@@ -85,8 +84,7 @@ class ContourDetector {
               final double db = p.b.toDouble() - seedB;
               final double diff = math.sqrt(dr * dr + dg * dg + db * db);
 
-              // Пиксель принадлежит объекту, если он близок по цвету к образцу и не является белым фоном
-              if (diff < colorTolerance && p.luminance < 205.0) {
+              if (diff < colorTolerance && p.luminance < 210.0) {
                 queue.add(nIdx);
               }
             }
@@ -95,11 +93,11 @@ class ContourDetector {
       }
     }
 
-    if (objectPixels.length < 40) {
-      return _generateDefaultBox(normX, normY, 0.06);
+    if (objectPixels.length < 30) {
+      return _generateDefaultPolygon(normX, normY, 0.07);
     }
 
-    // Вычисляем центр масс объекта
+    // Вычисляем геометрический центр пятна
     double sumX = 0, sumY = 0;
     for (final p in objectPixels) {
       sumX += p.x;
@@ -108,7 +106,7 @@ class ContourDetector {
     final double avgX = sumX / objectPixels.length;
     final double avgY = sumY / objectPixels.length;
 
-    // Выделяем только краевые точки объекта
+    // Выделяем граничные пиксели
     final List<math.Point<int>> edgePoints = [];
     for (final p in objectPixels) {
       final int x = p.x;
@@ -122,8 +120,8 @@ class ContourDetector {
       }
     }
 
-    // 8 радиальных секторов для построения внешнего контура
-    const int sectors = 8;
+    // Разбиваем на 12 направлений для точного огибания фигуры
+    const int sectors = 12;
     final List<math.Point<int>?> borderPoints = List.filled(sectors, null);
     final List<double> sectorDist = List.filled(sectors, 0.0);
 
@@ -146,15 +144,19 @@ class ContourDetector {
       }
     }
 
-    return contour.length >= 4 ? contour : _generateDefaultBox(normX, normY, 0.06);
+    return contour.length >= 5 ? contour : _generateDefaultPolygon(normX, normY, 0.07);
   }
 
-  static List<Offset> _generateDefaultBox(double cx, double cy, double r) {
-    return [
-      Offset((cx - r).clamp(0.0, 1.0), (cy - r).clamp(0.0, 1.0)),
-      Offset((cx + r).clamp(0.0, 1.0), (cy - r).clamp(0.0, 1.0)),
-      Offset((cx + r).clamp(0.0, 1.0), (cy + r).clamp(0.0, 1.0)),
-      Offset((cx - r).clamp(0.0, 1.0), (cy + r).clamp(0.0, 1.0)),
-    ];
+  static List<Offset> _generateDefaultPolygon(double cx, double cy, double r) {
+    const int count = 8;
+    final List<Offset> pts = [];
+    for (int i = 0; i < count; i++) {
+      final double ang = (2 * math.pi / count) * i;
+      pts.add(Offset(
+        (cx + r * math.cos(ang)).clamp(0.0, 1.0),
+        (cy + r * math.sin(ang)).clamp(0.0, 1.0),
+      ));
+    }
+    return pts;
   }
 }
