@@ -1,19 +1,31 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+class SamplePolygon {
+  String id;
+  List<Offset> points;
+  Color color;
+
+  SamplePolygon({
+    required this.id,
+    required this.points,
+    this.color = const Color(0xFF10B981),
+  });
+}
+
 class PolygonMath {
   /// Расчет площади произвольного многоугольника в пикселях по формуле Гаусса
   static double computeShoelaceArea(List<Offset> points) {
     if (points.length < 3) return 0.0;
     double area = 0.0;
     for (int i = 0; i < points.length; i++) {
-      int next = (i + 1) % points.length;
+      final int next = (i + 1) % points.length;
       area += points[i].dx * points[next].dy - points[next].dx * points[i].dy;
     }
     return (area.abs()) / 2.0;
   }
 
-  /// Поиск индекса вершины, ближайшей к точке касания (в радиусе захвата)
+  /// Поиск индекса вершины, ближайшей к точке касания
   static int findNearestPoint(Offset touch, List<Offset> points, double hitRadius) {
     for (int i = 0; i < points.length; i++) {
       if ((points[i] - touch).distance <= hitRadius) {
@@ -21,6 +33,19 @@ class PolygonMath {
       }
     }
     return -1;
+  }
+
+  /// Проверка, попал ли тап внутрь замкнутого полигона (Ray-Casting)
+  static bool isPointInside(Offset p, List<Offset> points) {
+    if (points.length < 3) return false;
+    bool inside = false;
+    for (int i = 0, j = points.length - 1; i < points.length; j = i++) {
+      if (((points[i].dy > p.dy) != (points[j].dy > p.dy)) &&
+          (p.dx < (points[j].dx - points[i].dx) * (p.dy - points[i].dy) / (points[j].dy - points[i].dy) + points[i].dx)) {
+        inside = !inside;
+      }
+    }
+    return inside;
   }
 
   /// Поиск ближайшего отрезка для вставки новой точки по тапу
