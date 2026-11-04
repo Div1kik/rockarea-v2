@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 class ContourDetector {
-  /// Сегментация объекта на белом листе бумаги через FloodFill связности
+  /// Сегментация объекта на светлом листе бумаги через связность пикселей (FloodFill)
   static List<Offset> extractContourAroundPoint({
     required img.Image image,
     required double normX,
     required double normY,
   }) {
-    // 1. Масштабируем для быстрого и стабильного анализа без подвисаний
+    // 1. Масштабируем до удобного размера для быстрого анализа без задержек
     const int maxDim = 500;
     final double scale = (math.max(image.width, image.height) > maxDim)
         ? maxDim / math.max(image.width, image.height)
@@ -26,10 +26,10 @@ class ContourDetector {
     final int w = small.width;
     final int h = small.height;
 
-    // 2. Порог бумаги: большинство лабораторных листов имеют яркость > 180-190
+    // Порог чистого листа бумаги
     const double paperThreshold = 185.0;
 
-    // Проверяем: если тапнули прямо в белый лист — отступаем
+    // Если нажатие произошло прямо в белый фон
     if (small.getPixel(startX, startY).luminance > paperThreshold) {
       return _generateDefaultBox(normX, normY, 0.08);
     }
@@ -41,9 +41,7 @@ class ContourDetector {
     queue.add(startIdx);
     visited[startIdx] = 1;
 
-    final List<Point<int>> objectPixels = [];
-
-    // Максимальный радиус поиска от тапа (чтобы не уйти на соседние образцы)
+    final List<math.Point<int>> objectPixels = [];
     final int maxSearchDist = (math.min(w, h) * 0.35).toInt();
 
     int iterations = 0;
@@ -53,7 +51,7 @@ class ContourDetector {
       final int cx = idx % w;
       final int cy = idx ~/ w;
 
-      objectPixels.add(Point<int>(cx, cy));
+      objectPixels.add(math.Point<int>(cx, cy));
 
       const List<int> dx = [-1, 1, 0, 0];
       const List<int> dy = [0, 0, -1, 1];
@@ -67,10 +65,10 @@ class ContourDetector {
           if (visited[nIdx] == 0) {
             visited[nIdx] = 1;
 
-            final double dist = math.sqrt(math.pow(nx - startX, 2) + math.pow(ny - startY, 2));
+            final double dist = math.sqrt((nx - startX) * (nx - startX) + (ny - startY) * (ny - startY));
             if (dist <= maxSearchDist) {
               final double lum = small.getPixel(nx, ny).luminance.toDouble();
-              // Все, что темнее чистого белого листа бумаги — тело объекта
+              // Все пиксели темнее белого фона бумаги относим к объекту
               if (lum < paperThreshold) {
                 queue.add(nIdx);
               }
@@ -84,7 +82,7 @@ class ContourDetector {
       return _generateDefaultBox(normX, normY, 0.08);
     }
 
-    // 3. Находим крайние граничные точки по 8 направлениям компаса
+    // 2. Определение границ и центра масс пятна
     int minX = w, maxX = 0, minY = h, maxY = 0;
     double sumX = 0, sumY = 0;
 
@@ -100,16 +98,16 @@ class ContourDetector {
     final double avgX = sumX / objectPixels.length;
     final double avgY = sumY / objectPixels.length;
 
-    // Ищем самые удаленные точки пятна по 8 секторам от центра масс
+    // 3. Выборка экстремальных точек по 8 направлениям
     const int sectors = 8;
-    final List<Point<int>?> extremePoints = List.filled(sectors, null);
+    final List<math.Point<int>?> extremePoints = List.filled(sectors, null);
     final List<double> maxDistances = List.filled(sectors, 0.0);
 
     for (final p in objectPixels) {
       final double ang = math.atan2(p.y - avgY, p.x - avgX);
       int sector = (((ang + math.pi) / (2 * math.pi)) * sectors).floor() % sectors;
 
-      final double d = math.pow(p.x - avgX, 2) + math.pow(p.y - avgY, 2) as double;
+      final double d = (p.x - avgX) * (p.x - avgX) + (p.y - avgY) * (p.y - avgY);
       if (d > maxDistances[sector]) {
         maxDistances[sector] = d;
         extremePoints[sector] = p;
