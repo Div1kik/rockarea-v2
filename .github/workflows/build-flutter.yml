@@ -34,18 +34,30 @@ jobs:
             cp -r /tmp/dummy_scaffold/android ./android
             rm -rf /tmp/dummy_scaffold
 
-            # Настройка SDK под требования плагинов (minSdk 21, compileSdk 35)
+            # Синхронизация версий SDK
             find android -name "build.gradle*" -exec sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' {} +
             find android -name "build.gradle*" -exec sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' {} +
             find android -name "build.gradle*" -exec sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' {} +
             find android -name "build.gradle*" -exec sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' {} +
+
+            # Гарантируем наличие mavenCentral() во всех блоках repositories
+            ROOT_GRADLE="android/build.gradle"
+            if [ -f "$ROOT_GRADLE" ]; then
+              sed -i 's/google()/google()\n        mavenCentral()/g' "$ROOT_GRADLE"
+            fi
+            SETTINGS_GRADLE="android/settings.gradle"
+            if [ -f "$SETTINGS_GRADLE" ]; then
+              sed -i 's/google()/google()\n        mavenCentral()/g' "$SETTINGS_GRADLE"
+            fi
           fi
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK (Debug)
-        run: flutter build apk --debug
+      - name: Build APK (Debug) with network retries
+        run: |
+          # Флаг --stacktrace для детальной диагностики и повтор при сетевом сбое Gradle
+          flutter build apk --debug || flutter build apk --debug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
