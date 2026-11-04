@@ -40,8 +40,9 @@ class PolygonMath {
     if (points.length < 3) return false;
     bool inside = false;
     for (int i = 0, j = points.length - 1; i < points.length; j = i++) {
-      if (((points[i].dy > p.dy) != (points[j].dy > p.dy)) &&
-          (p.dx < (points[j].dx - points[i].dx) * (p.dy - points[i].dy) / (points[j].dy - points[i].dy) + points[i].dx)) {
+      final bool intersect = ((points[i].dy > p.dy) != (points[j].dy > p.dy)) &&
+          (p.dx < (points[j].dx - points[i].dx) * (p.dy - points[i].dy) / (points[j].dy - points[i].dy) + points[i].dx);
+      if (intersect) {
         inside = !inside;
       }
     }
@@ -67,10 +68,13 @@ class PolygonMath {
   }
 
   static double _pointToSegmentDistance(Offset p, Offset a, Offset b) {
-    final double l2 = math.pow(a.dx - b.dx, 2) + math.pow(a.dy - b.dy, 2) as double;
+    final double dx = b.dx - a.dx;
+    final double dy = b.dy - a.dy;
+    final double l2 = dx * dx + dy * dy;
     if (l2 == 0) return (p - a).distance;
-    final double t = math.max(0, math.min(1, ((p.dx - a.dx) * (b.dx - a.dx) + (p.dy - a.dy) * (b.dy - a.dy)) / l2));
-    final Offset projection = Offset(a.dx + t * (b.dx - a.dx), a.dy + t * (b.dy - a.dy));
+
+    final double t = math.max(0.0, math.min(1.0, ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / l2));
+    final Offset projection = Offset(a.dx + t * dx, a.dy + t * dy);
     return (p - projection).distance;
   }
 }
