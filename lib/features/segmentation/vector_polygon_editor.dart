@@ -17,14 +17,16 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   final List<SamplePolygon> _polygons = [];
   int _activePolygonIndex = -1;
   int _activePointIndex = -1;
+  bool _isEditNodesMode = false; // Режим редактирования вершин
+  bool _isDraggingWholeObject = false;
+  Offset? _lastPanPos;
   Offset? _dragPosition;
 
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
-  // Реальный лабораторный масштаб при вертикальной съемке листа А4: ~520 px² = 1 см²
   final double _pixelsPerCm2 = 520.0;
-  static const double _hitRadius = 44.0;
+  static const double _hitRadius = 40.0;
   static const double _nodeRadius = 5.0;
 
   @override
@@ -46,18 +48,20 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onTapDown(TapDownDetails details, Size canvasSize) {
     final touch = details.localPosition;
 
-    if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
+    // В режиме узлов: проверяем добавление нового узла на ребро полигона
+    if (_isEditNodesMode && _activePolygonIndex != -1) {
       final poly = _polygons[_activePolygonIndex];
-      final hitIndex = PolygonMath.findNearestPoint(touch, poly.points, _hitRadius);
-      if (hitIndex != -1) {
+      final edgeIdx = PolygonMath.findNearestEdgeIndex(touch, poly.points, 24.0);
+      if (edgeIdx != -1) {
         setState(() {
-          _activePointIndex = hitIndex;
-          _dragPosition = touch;
+          poly.points.insert(edgeIdx + 1, touch);
+          _activePointIndex = edgeIdx + 1;
         });
         return;
       }
     }
 
+    // Выбор существующего образца
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(touch, _polygons[i].points)) {
         setState(() {
@@ -68,6 +72,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
+    // Добавление нового образца по свободному тапу
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(touch, canvasSize);
     }
@@ -99,41 +104,79 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       ));
       _activePolygonIndex = _polygons.length - 1;
       _activePointIndex = -1;
+      _isEditNodesMode = false;
     });
   }
 
   void _onPanStart(DragStartDetails details, Size canvasSize) {
     final touch = details.localPosition;
+    _lastPanPos = touch;
+
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
-      final hitIndex = PolygonMath.findNearestPoint(touch, poly.points, _hitRadius);
-      if (hitIndex != -1) {
+
+      // Если в режиме узлов — ищем ближайший вертекс
+      if (_isEditNodesMode) {
+        final hitIndex = PolygonMath.findNearestPoint(touch, poly.points, _hitRadius);
+        if (hitIndex != -1) {
+          setState(() {
+            _activePointIndex = hitIndex;
+            _dragPosition = touch;
+            _isDraggingWholeObject = false;
+          });
+          return;
+        }
+      }
+
+      // Иначе если схватили тело фигуры — двигаем её целиком
+      if (PolygonMath.isPointInside(touch, poly.points)) {
         setState(() {
-          _activePointIndex = hitIndex;
-          _dragPosition = touch;
+          _isDraggingWholeObject = true;
+          _activePointIndex = -1;
         });
       }
     }
   }
 
   void _onPanUpdate(DragUpdateDetails details, Size canvasSize) {
-    if (_activePolygonIndex != -1 && _activePointIndex != -1) {
-      final clampedPos = Offset(
-        details.localPosition.dx.clamp(0.0, canvasSize.width),
-        details.localPosition.dy.clamp(0.0, canvasSize.height),
-      );
+    final currentPos = details.localPosition;
 
-      setState(() {
-        _polygons[_activePolygonIndex].points[_activePointIndex] = clampedPos;
-        _dragPosition = clampedPos;
-      });
+    if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
+      final poly = _polygons[_activePolygonIndex];
+
+      // Движение отдельного узла
+      if (_isEditNodesMode && _activePointIndex != -1) {
+        final clampedPos = Offset(
+          currentPos.dx.clamp(0.0, canvasSize.width),
+          currentPos.dy.clamp(0.0, canvasSize.height),
+        );
+        setState(() {
+          poly.points[_activePointIndex] = clampedPos;
+          _dragPosition = clampedPos;
+        });
+      }
+      // Перемещение всей маски целиком
+      else if (_isDraggingWholeObject && _lastPanPos != null) {
+        final delta = currentPos - _lastPanPos!;
+        setState(() {
+          for (int i = 0; i < poly.points.length; i++) {
+            poly.points[i] = Offset(
+              (poly.points[i].dx + delta.dx).clamp(0.0, canvasSize.width),
+              (poly.points[i].dy + delta.dy).clamp(0.0, canvasSize.height),
+            );
+          }
+        });
+      }
     }
+    _lastPanPos = currentPos;
   }
 
   void _onPanEnd(DragEndDetails details) {
     setState(() {
       _activePointIndex = -1;
       _dragPosition = null;
+      _isDraggingWholeObject = false;
+      _lastPanPos = null;
     });
   }
 
@@ -248,6 +291,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       _polygons.removeAt(_activePolygonIndex);
                       _activePolygonIndex = _polygons.isNotEmpty ? _polygons.length - 1 : -1;
                       _activePointIndex = -1;
+                      _isEditNodesMode = false;
                     })
                 : null,
           ),
@@ -275,10 +319,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                         ),
                         Positioned.fill(
                           child: CustomPaint(
-                            painter: _MultiPolygonPainter(
+                            painter: _CleanPolygonPainter(
                               polygons: _polygons,
                               activeIndex: _activePolygonIndex,
                               activePointIndex: _activePointIndex,
+                              isEditNodesMode: _isEditNodesMode,
                               nodeRadius: _nodeRadius,
                             ),
                           ),
@@ -292,7 +337,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             onPanEnd: _onPanEnd,
                           ),
                         ),
-                        if (_dragPosition != null && _activePointIndex != -1)
+                        if (_dragPosition != null && _activePointIndex != -1 && _isEditNodesMode)
                           Positioned(
                             left: _dragPosition!.dx - 55,
                             top: _dragPosition!.dy - 125,
@@ -320,8 +365,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                   ),
                 ),
               ),
+
+              // Нижняя сводная таблица с переключателем режима узлов
               Container(
-                height: 220,
+                height: 235,
                 decoration: const BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -362,7 +409,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                     Expanded(
                       child: _polygons.isEmpty
                           ? const Center(
-                              child: Text('Коснитесь камня на фото для выделения контура',
+                              child: Text('Коснитесь объекта для авто-сегментации контура',
                                   style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
                             )
                           : ListView.builder(
@@ -407,10 +454,39 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                         ),
                                       ],
                                     ),
+                                    subtitle: isSelected
+                                        ? Row(
+                                            children: [
+                                              ActionChip(
+                                                padding: EdgeInsets.zero,
+                                                labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                                                visualDensity: VisualDensity.compact,
+                                                backgroundColor: _isEditNodesMode ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                                                label: Text(
+                                                  _isEditNodesMode ? 'Режим узлов (вкл)' : 'Редактировать линию',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: _isEditNodesMode ? Colors.white : const Color(0xFF334155),
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    _isEditNodesMode = !_isEditNodesMode;
+                                                    _activePointIndex = -1;
+                                                  });
+                                                },
+                                              ),
+                                            ],
+                                          )
+                                        : null,
                                     trailing: Text('${cm2Area.toStringAsFixed(2)} см²',
                                         style: const TextStyle(
                                             fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                                    onTap: () => setState(() => _activePolygonIndex = idx),
+                                    onTap: () => setState(() {
+                                      _activePolygonIndex = idx;
+                                      _isEditNodesMode = false;
+                                    }),
                                   ),
                                 );
                               },
@@ -427,16 +503,18 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   }
 }
 
-class _MultiPolygonPainter extends CustomPainter {
+class _CleanPolygonPainter extends CustomPainter {
   final List<SamplePolygon> polygons;
   final int activeIndex;
   final int activePointIndex;
+  final bool isEditNodesMode;
   final double nodeRadius;
 
-  _MultiPolygonPainter({
+  _CleanPolygonPainter({
     required this.polygons,
     required this.activeIndex,
     required this.activePointIndex,
+    required this.isEditNodesMode,
     required this.nodeRadius,
   });
 
@@ -449,7 +527,7 @@ class _MultiPolygonPainter extends CustomPainter {
       final bool isSelected = (p == activeIndex);
 
       final fillPaint = Paint()
-        ..color = (isSelected ? const Color(0xFFF97316) : const Color(0xFF94A3B8)).withOpacity(0.35)
+        ..color = (isSelected ? const Color(0xFFF97316) : const Color(0xFF94A3B8)).withOpacity(0.32)
         ..style = PaintingStyle.fill;
 
       final strokePaint = Paint()
@@ -466,7 +544,8 @@ class _MultiPolygonPainter extends CustomPainter {
       canvas.drawPath(path, fillPaint);
       canvas.drawPath(path, strokePaint);
 
-      if (isSelected) {
+      // Узлы показываем ТОЛЬКО если включен режим редактирования линии
+      if (isSelected && isEditNodesMode) {
         final nodePaint = Paint()..color = Colors.white;
         final activeNodePaint = Paint()..color = const Color(0xFFF97316);
         final borderPaint = Paint()
@@ -484,5 +563,5 @@ class _MultiPolygonPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MultiPolygonPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _CleanPolygonPainter oldDelegate) => true;
 }
