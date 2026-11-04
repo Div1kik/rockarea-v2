@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import '../../core/a4_detector.dart';
 import '../../core/archive_service.dart';
 import '../../core/contour_detector.dart';
 import '../../core/polygon_math.dart';
@@ -17,16 +18,23 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   final List<SamplePolygon> _polygons = [];
   int _activePolygonIndex = -1;
   int _activePointIndex = -1;
-  bool _isEditNodesMode = false; // Режим редактирования вершин
+
+  // Режимы редактирования
+  bool _isA4CalibMode = true; // При старте показываем рамку калибровки А4
+  bool _isEditNodesMode = false;
   bool _isDraggingWholeObject = false;
+
+  List<Offset> _a4Corners = []; // 4 угла листа А4
+  int _activeA4CornerIndex = -1;
+
   Offset? _lastPanPos;
   Offset? _dragPosition;
 
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
-  final double _pixelsPerCm2 = 520.0;
-  static const double _hitRadius = 40.0;
+  double _pixelsPerCm2 = 520.0; // Будет динамически пересчитано по листу А4
+  static const double _hitRadius = 42.0;
   static const double _nodeRadius = 5.0;
 
   @override
@@ -38,17 +46,46 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   Future<void> _loadImage() async {
     final bytes = await File(widget.imagePath).readAsBytes();
     final decoded = img.decodeImage(bytes);
-    if (mounted) {
+    if (mounted && decoded != null) {
+      final detectedCorners = A4Detector.detectA4Corners(decoded);
       setState(() {
         _decodedImage = decoded;
+        _a4Corners = detectedCorners;
       });
+    }
+  }
+
+  void _recalculateScale(Size canvasSize) {
+    if (_a4Corners.length < 4) return;
+    final screenCorners = _a4Corners.map((p) {
+      return Offset(p.dx * canvasSize.width, p.dy * canvasSize.height);
+    }).toList();
+
+    final a4PxArea = PolygonMath.computeShoelaceArea(screenCorners);
+    if (a4PxArea > 500) {
+      _pixelsPerCm2 = a4PxArea / A4Detector.a4PhysicalAreaCm2;
     }
   }
 
   void _onTapDown(TapDownDetails details, Size canvasSize) {
     final touch = details.localPosition;
 
-    // В режиме узлов: проверяем добавление нового узла на ребро полигона
+    // 1. В режиме калибровки А4 проверяем захват угла листа
+    if (_isA4CalibMode) {
+      for (int i = 0; i < _a4Corners.length; i++) {
+        final screenCorner = Offset(_a4Corners[i].dx * canvasSize.width, _a4Corners[i].dy * canvasSize.height);
+        if ((screenCorner - touch).distance <= _hitRadius) {
+          setState(() {
+            _activeA4CornerIndex = i;
+            _dragPosition = touch;
+          });
+          return;
+        }
+      }
+      return;
+    }
+
+    // 2. В режиме узлов: вставка нового узла на ребро полигона
     if (_isEditNodesMode && _activePolygonIndex != -1) {
       final poly = _polygons[_activePolygonIndex];
       final edgeIdx = PolygonMath.findNearestEdgeIndex(touch, poly.points, 24.0);
@@ -61,7 +98,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // Выбор существующего образца
+    // 3. Выбор существующего образца
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(touch, _polygons[i].points)) {
         setState(() {
@@ -72,7 +109,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // Добавление нового образца по свободному тапу
+    // 4. Добавление нового образца по свободному тапу
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(touch, canvasSize);
     }
@@ -112,10 +149,23 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     final touch = details.localPosition;
     _lastPanPos = touch;
 
+    if (_isA4CalibMode) {
+      for (int i = 0; i < _a4Corners.length; i++) {
+        final screenCorner = Offset(_a4Corners[i].dx * canvasSize.width, _a4Corners[i].dy * canvasSize.height);
+        if ((screenCorner - touch).distance <= _hitRadius) {
+          setState(() {
+            _activeA4CornerIndex = i;
+            _dragPosition = touch;
+          });
+          return;
+        }
+      }
+      return;
+    }
+
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
 
-      // Если в режиме узлов — ищем ближайший вертекс
       if (_isEditNodesMode) {
         final hitIndex = PolygonMath.findNearestPoint(touch, poly.points, _hitRadius);
         if (hitIndex != -1) {
@@ -128,7 +178,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         }
       }
 
-      // Иначе если схватили тело фигуры — двигаем её целиком
       if (PolygonMath.isPointInside(touch, poly.points)) {
         setState(() {
           _isDraggingWholeObject = true;
@@ -141,10 +190,21 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onPanUpdate(DragUpdateDetails details, Size canvasSize) {
     final currentPos = details.localPosition;
 
+    if (_isA4CalibMode && _activeA4CornerIndex != -1) {
+      setState(() {
+        _a4Corners[_activeA4CornerIndex] = Offset(
+          (currentPos.dx / canvasSize.width).clamp(0.0, 1.0),
+          (currentPos.dy / canvasSize.height).clamp(0.0, 1.0),
+        );
+        _dragPosition = currentPos;
+      });
+      _recalculateScale(canvasSize);
+      return;
+    }
+
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
 
-      // Движение отдельного узла
       if (_isEditNodesMode && _activePointIndex != -1) {
         final clampedPos = Offset(
           currentPos.dx.clamp(0.0, canvasSize.width),
@@ -154,9 +214,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
           poly.points[_activePointIndex] = clampedPos;
           _dragPosition = clampedPos;
         });
-      }
-      // Перемещение всей маски целиком
-      else if (_isDraggingWholeObject && _lastPanPos != null) {
+      } else if (_isDraggingWholeObject && _lastPanPos != null) {
         final delta = currentPos - _lastPanPos!;
         setState(() {
           for (int i = 0; i < poly.points.length; i++) {
@@ -174,6 +232,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onPanEnd(DragEndDetails details) {
     setState(() {
       _activePointIndex = -1;
+      _activeA4CornerIndex = -1;
       _dragPosition = null;
       _isDraggingWholeObject = false;
       _lastPanPos = null;
@@ -278,6 +337,25 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
         actions: [
+          // Кнопка включения/выключения калибровки листа А4
+          TextButton.icon(
+            onPressed: () {
+              setState(() {
+                _isA4CalibMode = !_isA4CalibMode;
+                _activePointIndex = -1;
+                _isEditNodesMode = false;
+              });
+            },
+            icon: Icon(Icons.crop_free, size: 18, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF64748B)),
+            label: Text(
+              _isA4CalibMode ? 'А4 (Калибр.)' : 'Калибровка',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.bookmark_add, color: Color(0xFFF97316)),
             tooltip: 'Сохранить в журнал',
@@ -304,6 +382,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
               ? Size(constraints.maxHeight * imgAspect, constraints.maxHeight)
               : Size(constraints.maxWidth, constraints.maxWidth / imgAspect);
 
+          _recalculateScale(canvasSize);
+
           return Column(
             children: [
               Expanded(
@@ -317,6 +397,19 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                         Positioned.fill(
                           child: Image.file(File(widget.imagePath), fit: BoxFit.fill),
                         ),
+
+                        // Рамка калибровки А4 (синий пунктир и 4 угловые точки)
+                        if (_isA4CalibMode && _a4Corners.length == 4)
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: _A4CalibPainter(
+                                corners: _a4Corners.map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height)).toList(),
+                                activeCornerIndex: _activeA4CornerIndex,
+                              ),
+                            ),
+                          ),
+
+                        // Контуры образцов
                         Positioned.fill(
                           child: CustomPaint(
                             painter: _CleanPolygonPainter(
@@ -328,6 +421,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             ),
                           ),
                         ),
+
+                        // Сенсорный слой
                         Positioned.fill(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
@@ -337,14 +432,16 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             onPanEnd: _onPanEnd,
                           ),
                         ),
-                        if (_dragPosition != null && _activePointIndex != -1 && _isEditNodesMode)
+
+                        // Аппаратная экранная лупа
+                        if (_dragPosition != null && (_activePointIndex != -1 || _activeA4CornerIndex != -1))
                           Positioned(
                             left: _dragPosition!.dx - 55,
                             top: _dragPosition!.dy - 125,
                             child: RawMagnifier(
                               decoration: const MagnifierDecoration(
                                 shape: CircleBorder(
-                                  side: BorderSide(color: Color(0xFFF97316), width: 3),
+                                  side: BorderSide(color: Color(0xFF2563EB), width: 3),
                                 ),
                                 shadows: [
                                   BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 4)),
@@ -355,6 +452,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                               focalPointOffset: const Offset(0, 70),
                             ),
                           ),
+
                         if (_isProcessing)
                           Container(
                             color: Colors.black26,
@@ -366,7 +464,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ),
               ),
 
-              // Нижняя сводная таблица с переключателем режима узлов
+              // Нижняя сводная таблица
               Container(
                 height: 235,
                 decoration: const BoxDecoration(
@@ -384,8 +482,22 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('ОБЩАЯ ПЛОЩАДЬ СЕРИИ',
-                                  style: TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                              Row(
+                                children: [
+                                  const Text('ОБЩАЯ ПЛОЩАДЬ СЕРИИ',
+                                      style: TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEFF6FF),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text('Масштаб А4: ${_pixelsPerCm2.toStringAsFixed(0)} px/см²',
+                                        style: const TextStyle(fontSize: 9, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
                               Text('${totalAreaCm2.toStringAsFixed(2)} см²',
                                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
                             ],
@@ -407,90 +519,109 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                     ),
                     const Divider(color: Color(0xFFE2E8F0), height: 1),
                     Expanded(
-                      child: _polygons.isEmpty
-                          ? const Center(
-                              child: Text('Коснитесь объекта для авто-сегментации контура',
-                                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                      child: _isA4CalibMode
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('Режим калибровки листа А4',
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                  const SizedBox(height: 4),
+                                  const Text('Подгоните 4 синих маркера по углам листа бумаги,\nзатем нажмите кнопку «Калибровка» вверху для разметки камней.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                  const SizedBox(height: 10),
+                                  OutlinedButton(
+                                    onPressed: () => setState(() => _isA4CalibMode = false),
+                                    child: const Text('Готово к разметке керна', style: TextStyle(fontSize: 12)),
+                                  ),
+                                ],
+                              ),
                             )
-                          : ListView.builder(
-                              itemCount: _polygons.length,
-                              itemBuilder: (context, idx) {
-                                final poly = _polygons[idx];
-                                final pxArea = PolygonMath.computeShoelaceArea(poly.points);
-                                final cm2Area = pxArea / _pixelsPerCm2;
-                                final isSelected = (idx == _activePolygonIndex);
+                          : _polygons.isEmpty
+                              ? const Center(
+                                  child: Text('Коснитесь камня на фото для авто-сегментации контура',
+                                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                                )
+                              : ListView.builder(
+                                  itemCount: _polygons.length,
+                                  itemBuilder: (context, idx) {
+                                    final poly = _polygons[idx];
+                                    final pxArea = PolygonMath.computeShoelaceArea(poly.points);
+                                    final cm2Area = pxArea / _pixelsPerCm2;
+                                    final isSelected = (idx == _activePolygonIndex);
 
-                                return Container(
-                                  decoration: BoxDecoration(
-                                    color: isSelected ? const Color(0xFFFFF7ED) : Colors.transparent,
-                                    border: Border(
-                                      left: BorderSide(
-                                        color: isSelected ? const Color(0xFFF97316) : Colors.transparent,
-                                        width: 4,
-                                      ),
-                                    ),
-                                  ),
-                                  child: ListTile(
-                                    dense: true,
-                                    leading: CircleAvatar(
-                                      radius: 12,
-                                      backgroundColor: isSelected ? const Color(0xFFF97316) : const Color(0xFFE2E8F0),
-                                      child: Text('${idx + 1}',
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              color: isSelected ? Colors.white : const Color(0xFF475569),
-                                              fontWeight: FontWeight.bold)),
-                                    ),
-                                    title: Row(
-                                      children: [
-                                        Text(poly.id,
-                                            style: TextStyle(
-                                                color: const Color(0xFF0F172A),
-                                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500)),
-                                        const SizedBox(width: 8),
-                                        GestureDetector(
-                                          onTap: () => _editSampleName(idx),
-                                          child: const Icon(Icons.edit_outlined, size: 15, color: Color(0xFF94A3B8)),
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? const Color(0xFFFFF7ED) : Colors.transparent,
+                                        border: Border(
+                                          left: BorderSide(
+                                            color: isSelected ? const Color(0xFFF97316) : Colors.transparent,
+                                            width: 4,
+                                          ),
                                         ),
-                                      ],
-                                    ),
-                                    subtitle: isSelected
-                                        ? Row(
-                                            children: [
-                                              ActionChip(
-                                                padding: EdgeInsets.zero,
-                                                labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                                visualDensity: VisualDensity.compact,
-                                                backgroundColor: _isEditNodesMode ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
-                                                label: Text(
-                                                  _isEditNodesMode ? 'Режим узлов (вкл)' : 'Редактировать линию',
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    color: _isEditNodesMode ? Colors.white : const Color(0xFF334155),
-                                                    fontWeight: FontWeight.w600,
+                                      ),
+                                      child: ListTile(
+                                        dense: true,
+                                        leading: CircleAvatar(
+                                          radius: 12,
+                                          backgroundColor: isSelected ? const Color(0xFFF97316) : const Color(0xFFE2E8F0),
+                                          child: Text('${idx + 1}',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: isSelected ? Colors.white : const Color(0xFF475569),
+                                                  fontWeight: FontWeight.bold)),
+                                        ),
+                                        title: Row(
+                                          children: [
+                                            Text(poly.id,
+                                                style: TextStyle(
+                                                    color: const Color(0xFF0F172A),
+                                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500)),
+                                            const SizedBox(width: 8),
+                                            GestureDetector(
+                                              onTap: () => _editSampleName(idx),
+                                              child: const Icon(Icons.edit_outlined, size: 15, color: Color(0xFF94A3B8)),
+                                            ),
+                                          ],
+                                        ),
+                                        subtitle: isSelected
+                                            ? Row(
+                                                children: [
+                                                  ActionChip(
+                                                    padding: EdgeInsets.zero,
+                                                    labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                                                    visualDensity: VisualDensity.compact,
+                                                    backgroundColor: _isEditNodesMode ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0),
+                                                    label: Text(
+                                                      _isEditNodesMode ? 'Режим узлов (вкл)' : 'Редактировать линию',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: _isEditNodesMode ? Colors.white : const Color(0xFF334155),
+                                                        fontWeight: FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                    onPressed: () {
+                                                      setState(() {
+                                                        _isEditNodesMode = !_isEditNodesMode;
+                                                        _activePointIndex = -1;
+                                                      });
+                                                    },
                                                   ),
-                                                ),
-                                                onPressed: () {
-                                                  setState(() {
-                                                    _isEditNodesMode = !_isEditNodesMode;
-                                                    _activePointIndex = -1;
-                                                  });
-                                                },
-                                              ),
-                                            ],
-                                          )
-                                        : null,
-                                    trailing: Text('${cm2Area.toStringAsFixed(2)} см²',
-                                        style: const TextStyle(
-                                            fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                                    onTap: () => setState(() {
-                                      _activePolygonIndex = idx;
-                                      _isEditNodesMode = false;
-                                    }),
-                                  ),
-                                );
-                              },
-                            ),
+                                                ],
+                                              )
+                                            : null,
+                                        trailing: Text('${cm2Area.toStringAsFixed(2)} см²',
+                                            style: const TextStyle(
+                                                fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                        onTap: () => setState(() {
+                                          _activePolygonIndex = idx;
+                                          _isEditNodesMode = false;
+                                        }),
+                                      ),
+                                    );
+                                  },
+                                ),
                     ),
                   ],
                 ),
@@ -501,6 +632,48 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       ),
     );
   }
+}
+
+class _A4CalibPainter extends CustomPainter {
+  final List<Offset> corners;
+  final int activeCornerIndex;
+
+  _A4CalibPainter({required this.corners, required this.activeCornerIndex});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (corners.length < 4) return;
+
+    final framePaint = Paint()
+      ..color = const Color(0xFF2563EB).withOpacity(0.8)
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    final path = Path()
+      ..moveTo(corners[0].dx, corners[0].dy)
+      ..lineTo(corners[1].dx, corners[1].dy)
+      ..lineTo(corners[2].dx, corners[2].dy)
+      ..lineTo(corners[3].dx, corners[3].dy)
+      ..close();
+
+    canvas.drawPath(path, framePaint);
+
+    final cornerPaint = Paint()..color = const Color(0xFF2563EB);
+    final borderPaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    for (int i = 0; i < corners.length; i++) {
+      final isSelected = (i == activeCornerIndex);
+      final r = isSelected ? 9.0 : 6.5;
+      canvas.drawCircle(corners[i], r, cornerPaint);
+      canvas.drawCircle(corners[i], r, borderPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _A4CalibPainter oldDelegate) => true;
 }
 
 class _CleanPolygonPainter extends CustomPainter {
@@ -531,7 +704,7 @@ class _CleanPolygonPainter extends CustomPainter {
         ..style = PaintingStyle.fill;
 
       final strokePaint = Paint()
-        ..color = isSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B)
+        ..color = isSelected ? const Color(0xFFF97316) : const Color(0xFF64748B)
         ..strokeWidth = isSelected ? 2.5 : 1.5
         ..style = PaintingStyle.stroke;
 
@@ -544,7 +717,6 @@ class _CleanPolygonPainter extends CustomPainter {
       canvas.drawPath(path, fillPaint);
       canvas.drawPath(path, strokePaint);
 
-      // Узлы показываем ТОЛЬКО если включен режим редактирования линии
       if (isSelected && isEditNodesMode) {
         final nodePaint = Paint()..color = Colors.white;
         final activeNodePaint = Paint()..color = const Color(0xFFF97316);
