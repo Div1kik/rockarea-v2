@@ -23,7 +23,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   bool _isProcessing = false;
 
   final double _pixelsPerCm2 = 1400.0;
-  static const double _hitRadius = 48.0; // Сверхнадежный захват для пальца
+  static const double _hitRadius = 48.0;
   static const double _nodeRadius = 7.5;
 
   @override
@@ -45,7 +45,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onTapDown(TapDownDetails details, Size canvasSize) {
     final touch = details.localPosition;
 
-    // 1. Проверяем выбор существующего узла
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
       final hitIndex = PolygonMath.findNearestPoint(touch, poly.points, _hitRadius);
@@ -58,7 +57,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 2. Проверяем выбор другого полигона
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(touch, _polygons[i].points)) {
         setState(() {
@@ -69,7 +67,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 3. Тап в свободное место — запускаем автодетекцию
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(touch, canvasSize);
     }
@@ -272,12 +269,9 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        // Изображение
                         Positioned.fill(
                           child: Image.file(File(widget.imagePath), fit: BoxFit.fill),
                         ),
-
-                        // Векторные полигоны
                         Positioned.fill(
                           child: CustomPaint(
                             painter: _MultiPolygonPainter(
@@ -288,8 +282,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             ),
                           ),
                         ),
-
-                        // Сенсорный слой
                         Positioned.fill(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
@@ -299,8 +291,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             onPanEnd: _onPanEnd,
                           ),
                         ),
-
-                        // Аппаратная экранная лупа с реальным 2x увеличением картинки под пальцем
                         if (_dragPosition != null && _activePointIndex != -1)
                           Positioned(
                             left: _dragPosition!.dx - 55,
@@ -310,7 +300,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                 shape: CircleBorder(
                                   side: BorderSide(color: Color(0xFFF97316), width: 3),
                                 ),
-                                shadow: [
+                                shadows: [
                                   BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 4)),
                                 ],
                               ),
@@ -319,7 +309,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                               focalPointOffset: const Offset(0, 70),
                             ),
                           ),
-
                         if (_isProcessing)
                           Container(
                             color: Colors.black26,
@@ -330,8 +319,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                   ),
                 ),
               ),
-
-              // Нижняя сводная таблица
               Container(
                 height: 220,
                 decoration: const BoxDecoration(
