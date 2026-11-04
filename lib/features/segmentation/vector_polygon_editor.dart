@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import '../../core/archive_service.dart';
 import '../../core/contour_detector.dart';
 import '../../core/polygon_math.dart';
 
@@ -21,8 +22,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
-  // Масштабный коэффициент: пикселей на 1 см²
-  double _pixelsPerCm2 = 1200.0;
+  // Масштабный калибровочный коэффициент: ~1400 px² = 1 см²
+  final double _pixelsPerCm2 = 1400.0;
 
   static const double _hitRadius = 24.0;
   static const double _nodeRadius = 6.0;
@@ -46,7 +47,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onTapDown(TapDownDetails details, BoxConstraints constraints) {
     final touch = details.localPosition;
 
-    // 1. Проверяем выбор существующего полигона
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(touch, _polygons[i].points)) {
         setState(() {
@@ -56,7 +56,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 2. Детектируем новый объект по тапу
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(touch, constraints);
     }
@@ -68,7 +67,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     final normX = touch.dx / constraints.maxWidth;
     final normY = touch.dy / constraints.maxHeight;
 
-    final detectedPoints = ContourDetector.extractContourAroundPoint(
+    final detectedNormPoints = ContourDetector.extractContourAroundPoint(
       image: _decodedImage!,
       normX: normX,
       normY: normY,
@@ -77,27 +76,15 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     setState(() {
       _isProcessing = false;
       final int nextNum = _polygons.length + 1;
-      if (detectedPoints.isNotEmpty) {
-        final screenPoints = detectedPoints.map((p) {
-          return Offset(p.dx * constraints.maxWidth, p.dy * constraints.maxHeight);
-        }).toList();
 
-        _polygons.add(SamplePolygon(
-          id: 'Образец №$nextNum',
-          points: screenPoints,
-        ));
-      } else {
-        const r = 50.0;
-        _polygons.add(SamplePolygon(
-          id: 'Образец №$nextNum',
-          points: [
-            Offset(touch.dx - r, touch.dy - r),
-            Offset(touch.dx + r, touch.dy - r),
-            Offset(touch.dx + r, touch.dy + r),
-            Offset(touch.dx - r, touch.dy + r),
-          ],
-        ));
-      }
+      final screenPoints = detectedNormPoints.map((p) {
+        return Offset(p.dx * constraints.maxWidth, p.dy * constraints.maxHeight);
+      }).toList();
+
+      _polygons.add(SamplePolygon(
+        id: 'Образец №$nextNum',
+        points: screenPoints,
+      ));
       _activePolygonIndex = _polygons.length - 1;
     });
   }
@@ -171,6 +158,43 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     );
   }
 
+  Future<void> _saveToArchive() async {
+    if (_polygons.isEmpty) return;
+
+    double totalArea = 0.0;
+    final List<SampleItem> samples = [];
+
+    for (final p in _polygons) {
+      final px = PolygonMath.computeShoelaceArea(p.points);
+      final cm2 = px / _pixelsPerCm2;
+      totalArea += cm2;
+      samples.add(SampleItem(name: p.id, areaPx: px, areaCm2: cm2));
+    }
+
+    final now = DateTime.now();
+    final dateStr = '${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    final record = TestRecord(
+      id: 'Серия #${now.millisecondsSinceEpoch.toString().substring(8)}',
+      date: dateStr,
+      imagePath: widget.imagePath,
+      totalAreaCm2: totalArea,
+      samples: samples,
+    );
+
+    await ArchiveService.saveRecord(record);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Color(0xFF10B981),
+          content: Text('Серия испытаний успешно сохранена в архив!'),
+        ),
+      );
+      Navigator.pop(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     double totalAreaCm2 = 0.0;
@@ -186,6 +210,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         backgroundColor: const Color(0xFF131C2E),
         actions: [
           IconButton(
+            icon: const Icon(Icons.bookmark_add, color: Color(0xFF10B981)),
+            tooltip: 'Сохранить в архив',
+            onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
+          ),
+          IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
             tooltip: 'Удалить активный объект',
             onPressed: _activePolygonIndex != -1
@@ -194,14 +223,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       _activePolygonIndex = _polygons.isNotEmpty ? _polygons.length - 1 : -1;
                     })
                 : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Очистить всё',
-            onPressed: () => setState(() {
-              _polygons.clear();
-              _activePolygonIndex = -1;
-            }),
           ),
         ],
       ),
@@ -241,34 +262,16 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           child: CircularProgressIndicator(color: Color(0xFF10B981)),
                         ),
                       ),
-                    if (_currentTouch != null && _activePointIndex != -1)
-                      Positioned(
-                        left: (_currentTouch!.dx - 45).clamp(10, constraints.maxWidth - 100),
-                        top: (_currentTouch!.dy - 120).clamp(10, constraints.maxHeight - 100),
-                        child: Container(
-                          width: 90,
-                          height: 90,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFF10B981), width: 2.5),
-                            color: Colors.black.withOpacity(0.65),
-                          ),
-                          child: const Center(
-                            child: Icon(Icons.gps_fixed, color: Color(0xFF10B981), size: 28),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
 
-              // Нижняя панель с таблицей
+              // Нижняя сводная таблица
               Container(
                 height: 220,
                 decoration: const BoxDecoration(
                   color: Color(0xFF131C2E),
                   borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                  boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 10)],
                 ),
                 child: Column(
                   children: [
@@ -280,15 +283,22 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('ИТОГОВАЯ ПЛОЩАДЬ СЕРИИ',
+                              const Text('ОБЩАЯ ПЛОЩАДЬ СЕРИИ',
                                   style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8), fontWeight: FontWeight.bold)),
                               Text('${totalAreaCm2.toStringAsFixed(2)} см²',
                                   style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
                             ],
                           ),
-                          Text('Объектов: ${_polygons.length}\nТап по названию — переименовать',
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                            icon: const Icon(Icons.check, size: 16),
+                            label: const Text('В архив', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
+                          ),
                         ],
                       ),
                     ),
@@ -296,8 +306,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                     Expanded(
                       child: _polygons.isEmpty
                           ? const Center(
-                              child: Text('Тапните по образцу на фото\nдля добавления в расчет',
-                                  textAlign: TextAlign.center,
+                              child: Text('Тапните по камню для авто-выделения контура',
                                   style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                             )
                           : ListView.builder(
@@ -331,8 +340,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                         ),
                                       ],
                                     ),
-                                    subtitle: Text('${pxArea.toStringAsFixed(0)} px²',
-                                        style: const TextStyle(fontSize: 10, color: Color(0xFF64748B))),
                                     trailing: Text('${cm2Area.toStringAsFixed(2)} см²',
                                         style: const TextStyle(
                                             fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
@@ -374,13 +381,14 @@ class _MultiPolygonPainter extends CustomPainter {
 
       final bool isSelected = (p == activeIndex);
 
+      // Яркая неоновая заливка и четкий контур
       final fillPaint = Paint()
-        ..color = (isSelected ? const Color(0xFF10B981) : const Color(0xFF3B82F6)).withOpacity(0.28)
+        ..color = (isSelected ? const Color(0xFF10B981) : const Color(0xFF3B82F6)).withOpacity(0.38)
         ..style = PaintingStyle.fill;
 
       final strokePaint = Paint()
         ..color = isSelected ? const Color(0xFF10B981) : const Color(0xFF3B82F6)
-        ..strokeWidth = isSelected ? 2.2 : 1.5
+        ..strokeWidth = isSelected ? 2.8 : 1.8
         ..style = PaintingStyle.stroke;
 
       final path = Path()..moveTo(poly.points.first.dx, poly.points.first.dy);
