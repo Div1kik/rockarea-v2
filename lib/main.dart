@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'features/archive/archive_screen.dart';
 import 'features/segmentation/vector_polygon_editor.dart';
 
 void main() {
@@ -72,6 +73,17 @@ class _MainCaptureScreenState extends State<MainCaptureScreen> {
       appBar: AppBar(
         title: const Text('RockArea v2 — Лаборатория', style: TextStyle(fontSize: 16)),
         backgroundColor: const Color(0xFF131C2E),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF10B981)),
+            tooltip: 'Архив испытаний',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ArchiveScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: Center(
         child: Padding(
@@ -97,7 +109,7 @@ class _MainCaptureScreenState extends State<MainCaptureScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Сделайте снимок торца образца скальной породы для векторной сегментации контура',
+                'Сделайте снимок фрагментов на листе бумаги для авто-определения границ и расчета площади',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
               ),
@@ -133,6 +145,16 @@ class _MainCaptureScreenState extends State<MainCaptureScreen> {
                     label: const Text('Выбрать образец из галереи'),
                     onPressed: () => _pickImage(ImageSource.gallery),
                   ),
+                ),
+                const SizedBox(height: 20),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ArchiveScreen()),
+                    );
+                  },
+                  icon: const Icon(Icons.folder_open, color: Color(0xFF10B981)),
+                  label: const Text('Открыть архив сессий', style: TextStyle(color: Color(0xFF10B981))),
                 ),
               ],
             ],
