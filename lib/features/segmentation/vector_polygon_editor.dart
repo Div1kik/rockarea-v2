@@ -22,10 +22,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
-  // Реалистичный коэффициент масштаба для А4 в кадре: ~4200 px² = 1 см²
-  final double _pixelsPerCm2 = 4200.0;
+  // Реальный лабораторный масштаб при вертикальной съемке листа А4: ~520 px² = 1 см²
+  final double _pixelsPerCm2 = 520.0;
   static const double _hitRadius = 44.0;
-  static const double _nodeRadius = 4.5; // Компактные аккуратные узлы
+  static const double _nodeRadius = 5.0;
 
   @override
   void initState() {
