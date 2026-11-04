@@ -56,12 +56,32 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     final selectedRecords = _records.where((r) => _selectedIds.contains(r.id)).toList();
     if (selectedRecords.isEmpty) return;
 
-    final success = await ExportService.exportSelectedRecordsToCsv(selectedRecords);
-    if (mounted && success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Color(0xFF2563EB),
-          content: Text('Файл CSV успешно сформирован и передан для сохранения!'),
+    final savedPath = await ExportService.exportSelectedRecordsToCsv(selectedRecords);
+    if (!mounted) return;
+
+    if (savedPath != null) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Color(0xFF2563EB)),
+              SizedBox(width: 8),
+              Text('Файл сохранен', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+            ],
+          ),
+          content: Text(
+            'Таблица успешно сохранена на устройство:\n\n$savedPath',
+            style: const TextStyle(fontSize: 13, color: Color(0xFF475569)),
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Понятно'),
+            ),
+          ],
         ),
       );
     }
