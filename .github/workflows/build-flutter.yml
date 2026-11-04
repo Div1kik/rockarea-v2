@@ -30,14 +30,15 @@ jobs:
         run: |
           if [ ! -d "android" ]; then
             echo "Generating clean Android platform folder..."
-            # Генерируем каркас во временной папке, чтобы не задеть файлы репозитория
             flutter create /tmp/dummy_scaffold --project-name=rockarea --platforms=android --org=com.div1kik.rockarea
             cp -r /tmp/dummy_scaffold/android ./android
             rm -rf /tmp/dummy_scaffold
 
-            # Устанавливаем minSdkVersion 21
+            # Настройка SDK под требования плагинов (minSdk 21, compileSdk 35)
             find android -name "build.gradle*" -exec sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' {} +
             find android -name "build.gradle*" -exec sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' {} +
+            find android -name "build.gradle*" -exec sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' {} +
+            find android -name "build.gradle*" -exec sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' {} +
           fi
 
       - name: Install dependencies
