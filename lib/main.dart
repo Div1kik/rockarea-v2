@@ -17,11 +17,12 @@ class RockAreaApp extends StatelessWidget {
       title: 'RockArea Core v2',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0B0F19),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF10B981),
-          surface: Color(0xFF131C2E),
+        brightness: Brightness.light,
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+        colorScheme: const ColorScheme.light(
+          primary: Color(0xFFF97316),
+          secondary: Color(0xFF2563EB),
+          surface: Colors.white,
         ),
         useMaterial3: true,
       ),
@@ -70,13 +71,15 @@ class _MainCaptureScreenState extends State<MainCaptureScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('RockArea v2 — Лаборатория', style: TextStyle(fontSize: 16)),
-        backgroundColor: const Color(0xFF131C2E),
+        title: const Text('RockArea Core v2', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
         actions: [
           IconButton(
-            icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF10B981)),
-            tooltip: 'Архив испытаний',
+            icon: const Icon(Icons.folder_open_outlined, color: Color(0xFF2563EB)),
+            tooltip: 'Журнал испытаний',
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ArchiveScreen()),
@@ -96,53 +99,58 @@ class _MainCaptureScreenState extends State<MainCaptureScreen> {
                 height: 100,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFF10B981).withOpacity(0.15),
-                  border: Border.all(color: const Color(0xFF10B981), width: 2),
+                  color: const Color(0xFFFFF7ED),
+                  border: Border.all(color: const Color(0xFFF97316), width: 2),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x0D000000), blurRadius: 10, offset: Offset(0, 4)),
+                  ],
                 ),
-                child: const Icon(Icons.analytics_outlined, size: 48, color: Color(0xFF10B981)),
+                child: const Icon(Icons.view_in_ar_outlined, size: 48, color: Color(0xFFF97316)),
               ),
               const SizedBox(height: 24),
               const Text(
-                'Планиметрия сечения керна',
+                'Планиметрия керна и сколов',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
               ),
               const SizedBox(height: 8),
               const Text(
-                'Сделайте снимок фрагментов на листе бумаги для авто-определения границ и расчета площади',
+                'Разместите образцы на листе бумаги для точной авто-сегментации контуров и расчёта площади',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
               ),
               const SizedBox(height: 40),
               if (_isLoading)
-                const CircularProgressIndicator(color: Color(0xFF10B981))
+                const CircularProgressIndicator(color: Color(0xFFF97316))
               else ...[
                 SizedBox(
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
+                      backgroundColor: const Color(0xFFF97316),
                       foregroundColor: Colors.white,
+                      elevation: 0,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Сделать снимок камеры', style: TextStyle(fontWeight: FontWeight.bold)),
+                    icon: const Icon(Icons.camera_alt_outlined),
+                    label: const Text('Сделать снимок камерой', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                     onPressed: () => _pickImage(ImageSource.camera),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
                   height: 52,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF94A3B8),
-                      side: const BorderSide(color: Color(0xFF334155)),
+                      foregroundColor: const Color(0xFF2563EB),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      backgroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    icon: const Icon(Icons.photo_library),
-                    label: const Text('Выбрать образец из галереи'),
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('Выбрать фото из галереи', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                     onPressed: () => _pickImage(ImageSource.gallery),
                   ),
                 ),
@@ -153,8 +161,8 @@ class _MainCaptureScreenState extends State<MainCaptureScreen> {
                       MaterialPageRoute(builder: (_) => const ArchiveScreen()),
                     );
                   },
-                  icon: const Icon(Icons.folder_open, color: Color(0xFF10B981)),
-                  label: const Text('Открыть архив сессий', style: TextStyle(color: Color(0xFF10B981))),
+                  icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF64748B), size: 18),
+                  label: const Text('Открыть архив сессий', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                 ),
               ],
             ],
