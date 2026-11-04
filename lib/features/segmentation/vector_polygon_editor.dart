@@ -22,11 +22,9 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
-  // Масштабный калибровочный коэффициент: ~1400 px² = 1 см²
   final double _pixelsPerCm2 = 1400.0;
-
-  static const double _hitRadius = 24.0;
-  static const double _nodeRadius = 6.0;
+  static const double _hitRadius = 26.0;
+  static const double _nodeRadius = 6.5;
 
   @override
   void initState() {
@@ -172,7 +170,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
 
     final now = DateTime.now();
-    final dateStr = '${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final dateStr =
+        '${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
     final record = TestRecord(
       id: 'Серия #${now.millisecondsSinceEpoch.toString().substring(8)}',
@@ -188,7 +187,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: Color(0xFF10B981),
-          content: Text('Серия испытаний успешно сохранена в архив!'),
+          content: Text('Серия испытаний успешно сохранена в журнал!'),
         ),
       );
       Navigator.pop(context);
@@ -266,7 +265,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ),
               ),
 
-              // Нижняя сводная таблица
+              // Нижняя таблица серии
               Container(
                 height: 220,
                 decoration: const BoxDecoration(
@@ -306,7 +305,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                     Expanded(
                       child: _polygons.isEmpty
                           ? const Center(
-                              child: Text('Тапните по камню для авто-выделения контура',
+                              child: Text('Тапните по камню для авто-определения границы',
                                   style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                             )
                           : ListView.builder(
@@ -381,7 +380,6 @@ class _MultiPolygonPainter extends CustomPainter {
 
       final bool isSelected = (p == activeIndex);
 
-      // Яркая неоновая заливка и четкий контур
       final fillPaint = Paint()
         ..color = (isSelected ? const Color(0xFF10B981) : const Color(0xFF3B82F6)).withOpacity(0.38)
         ..style = PaintingStyle.fill;
