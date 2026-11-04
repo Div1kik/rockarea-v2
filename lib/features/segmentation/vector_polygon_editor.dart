@@ -22,9 +22,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
-  final double _pixelsPerCm2 = 1400.0;
-  static const double _hitRadius = 48.0;
-  static const double _nodeRadius = 7.5;
+  // Реалистичный коэффициент масштаба для А4 в кадре: ~4200 px² = 1 см²
+  final double _pixelsPerCm2 = 4200.0;
+  static const double _hitRadius = 44.0;
+  static const double _nodeRadius = 4.5; // Компактные аккуратные узлы
 
   @override
   void initState() {
@@ -470,7 +471,7 @@ class _MultiPolygonPainter extends CustomPainter {
         final activeNodePaint = Paint()..color = const Color(0xFFF97316);
         final borderPaint = Paint()
           ..color = const Color(0xFF2563EB)
-          ..strokeWidth = 2.0
+          ..strokeWidth = 1.5
           ..style = PaintingStyle.stroke;
 
         for (int i = 0; i < poly.points.length; i++) {
