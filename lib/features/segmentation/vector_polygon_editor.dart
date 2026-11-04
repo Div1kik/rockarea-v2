@@ -19,12 +19,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   int _activePolygonIndex = -1;
   int _activePointIndex = -1;
 
-  // Режимы редактирования
-  bool _isA4CalibMode = true; // При старте показываем рамку калибровки А4
+  bool _isA4CalibMode = true;
   bool _isEditNodesMode = false;
   bool _isDraggingWholeObject = false;
 
-  List<Offset> _a4Corners = []; // 4 угла листа А4
+  List<Offset> _a4Corners = [];
   int _activeA4CornerIndex = -1;
 
   Offset? _lastPanPos;
@@ -33,7 +32,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
-  double _pixelsPerCm2 = 520.0; // Будет динамически пересчитано по листу А4
+  double _pixelsPerCm2 = 520.0;
   static const double _hitRadius = 42.0;
   static const double _nodeRadius = 5.0;
 
@@ -62,7 +61,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }).toList();
 
     final a4PxArea = PolygonMath.computeShoelaceArea(screenCorners);
-    if (a4PxArea > 500) {
+    if (a4PxArea > 1000) {
       _pixelsPerCm2 = a4PxArea / A4Detector.a4PhysicalAreaCm2;
     }
   }
@@ -70,7 +69,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onTapDown(TapDownDetails details, Size canvasSize) {
     final touch = details.localPosition;
 
-    // 1. В режиме калибровки А4 проверяем захват угла листа
     if (_isA4CalibMode) {
       for (int i = 0; i < _a4Corners.length; i++) {
         final screenCorner = Offset(_a4Corners[i].dx * canvasSize.width, _a4Corners[i].dy * canvasSize.height);
@@ -85,7 +83,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       return;
     }
 
-    // 2. В режиме узлов: вставка нового узла на ребро полигона
     if (_isEditNodesMode && _activePolygonIndex != -1) {
       final poly = _polygons[_activePolygonIndex];
       final edgeIdx = PolygonMath.findNearestEdgeIndex(touch, poly.points, 24.0);
@@ -98,7 +95,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 3. Выбор существующего образца
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(touch, _polygons[i].points)) {
         setState(() {
@@ -109,7 +105,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 4. Добавление нового образца по свободному тапу
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(touch, canvasSize);
     }
@@ -337,7 +332,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
         actions: [
-          // Кнопка включения/выключения калибровки листа А4
           TextButton.icon(
             onPressed: () {
               setState(() {
@@ -397,8 +391,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                         Positioned.fill(
                           child: Image.file(File(widget.imagePath), fit: BoxFit.fill),
                         ),
-
-                        // Рамка калибровки А4 (синий пунктир и 4 угловые точки)
                         if (_isA4CalibMode && _a4Corners.length == 4)
                           Positioned.fill(
                             child: CustomPaint(
@@ -408,8 +400,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                               ),
                             ),
                           ),
-
-                        // Контуры образцов
                         Positioned.fill(
                           child: CustomPaint(
                             painter: _CleanPolygonPainter(
@@ -421,8 +411,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             ),
                           ),
                         ),
-
-                        // Сенсорный слой
                         Positioned.fill(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
@@ -432,8 +420,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             onPanEnd: _onPanEnd,
                           ),
                         ),
-
-                        // Аппаратная экранная лупа
                         if (_dragPosition != null && (_activePointIndex != -1 || _activeA4CornerIndex != -1))
                           Positioned(
                             left: _dragPosition!.dx - 55,
@@ -452,7 +438,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                               focalPointOffset: const Offset(0, 70),
                             ),
                           ),
-
                         if (_isProcessing)
                           Container(
                             color: Colors.black26,
@@ -464,7 +449,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ),
               ),
 
-              // Нижняя сводная таблица
+              // Нижняя сводная панель (без overflow)
               Container(
                 height: 235,
                 decoration: const BoxDecoration(
@@ -475,43 +460,44 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 child: Column(
                   children: [
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Text('ОБЩАЯ ПЛОЩАДЬ СЕРИИ',
-                                      style: TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFEFF6FF),
-                                      borderRadius: BorderRadius.circular(4),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text('ОБЩАЯ ПЛОЩАДЬ',
+                                        style: TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEFF6FF),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text('${_pixelsPerCm2.toStringAsFixed(0)} px/см²',
+                                          style: const TextStyle(fontSize: 9, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
                                     ),
-                                    child: Text('Масштаб А4: ${_pixelsPerCm2.toStringAsFixed(0)} px/см²',
-                                        style: const TextStyle(fontSize: 9, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ),
-                              Text('${totalAreaCm2.toStringAsFixed(2)} см²',
-                                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
-                            ],
+                                  ],
+                                ),
+                                Text('${totalAreaCm2.toStringAsFixed(2)} см²',
+                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+                              ],
+                            ),
                           ),
                           ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFFF97316),
                               foregroundColor: Colors.white,
                               elevation: 0,
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                             icon: const Icon(Icons.check, size: 16),
-                            label: const Text('В журнал', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                            label: const Text('В журнал', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                             onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
                           ),
                         ],
@@ -524,16 +510,21 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Text('Режим калибровки листа А4',
+                                  const Text('Калибровка листа А4',
                                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                                   const SizedBox(height: 4),
-                                  const Text('Подгоните 4 синих маркера по углам листа бумаги,\nзатем нажмите кнопку «Калибровка» вверху для разметки камней.',
+                                  const Text('Подтяните 4 синих маркера строго по 4 углам белого листа бумаги.',
                                       textAlign: TextAlign.center,
                                       style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                                  const SizedBox(height: 10),
-                                  OutlinedButton(
+                                  const SizedBox(height: 8),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2563EB),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                    ),
                                     onPressed: () => setState(() => _isA4CalibMode = false),
-                                    child: const Text('Готово к разметке керна', style: TextStyle(fontSize: 12)),
+                                    child: const Text('Готово, перейти к керну', style: TextStyle(fontSize: 12)),
                                   ),
                                 ],
                               ),
@@ -645,7 +636,7 @@ class _A4CalibPainter extends CustomPainter {
     if (corners.length < 4) return;
 
     final framePaint = Paint()
-      ..color = const Color(0xFF2563EB).withOpacity(0.8)
+      ..color = const Color(0xFF2563EB).withOpacity(0.85)
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
 
@@ -666,7 +657,7 @@ class _A4CalibPainter extends CustomPainter {
 
     for (int i = 0; i < corners.length; i++) {
       final isSelected = (i == activeCornerIndex);
-      final r = isSelected ? 9.0 : 6.5;
+      final r = isSelected ? 9.5 : 7.0;
       canvas.drawCircle(corners[i], r, cornerPaint);
       canvas.drawCircle(corners[i], r, borderPaint);
     }
