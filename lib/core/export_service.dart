@@ -1,14 +1,14 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'archive_service.dart';
 
 class ExportService {
-  /// Прямое сохранение CSV в локальную память устройства (Download / Documents)
-  static Future<String> exportSelectedRecordsToCsv(List<TestRecord> records) async {
-    if (records.isEmpty) return '';
+  /// Экспорт выбранных серий в CSV с системным сохранением
+  static Future<bool> exportSelectedRecordsToCsv(List<TestRecord> records) async {
+    if (records.isEmpty) return false;
 
     final StringBuffer buffer = StringBuffer();
-    // Стандартный разделитель ';' для корректного открытия в Excel без искажений
     buffer.writeln('ID_Серии;Дата_Время;Шифр_Образца;Площадь_px2;Площадь_см2;Суммарная_Площадь_см2');
 
     for (final rec in records) {
@@ -21,20 +21,17 @@ class ExportService {
       }
     }
 
-    Directory? targetDir;
-    if (Platform.isAndroid) {
-      // Прямой доступ к системной папке загрузок Android
-      final downloadDir = Directory('/storage/emulated/0/Download');
-      if (downloadDir.existsSync()) {
-        targetDir = downloadDir;
-      }
-    }
-    targetDir ??= await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-
+    final directory = await getApplicationDocumentsDirectory();
     final String fileName = 'RockArea_${DateTime.now().millisecondsSinceEpoch}.csv';
-    final File file = File('${targetDir.path}/$fileName');
+    final File file = File('${directory.path}/$fileName');
     await file.writeAsString(buffer.toString());
 
-    return file.path;
+    final result = await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'text/csv')],
+      text: 'Экспорт журнала испытаний RockArea Core v2',
+      subject: 'Лабораторные испытания керна',
+    );
+
+    return result.status == ShareResultStatus.success || result.status == ShareResultStatus.dismissed;
   }
 }
