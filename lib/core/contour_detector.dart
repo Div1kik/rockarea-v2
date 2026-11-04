@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 class ContourDetector {
-  /// Адаптивный поиск границы: ровный 8-узловой полигон без колючих артефактов
+  /// Ровный контур объекта с фильтрацией градиента и автоматическим масштабом
   static List<Offset> extractContourAroundPoint({
     required img.Image image,
     required double normX,
@@ -12,58 +12,65 @@ class ContourDetector {
     final int cx = (normX * image.width).toInt().clamp(0, image.width - 1);
     final int cy = (normY * image.height).toInt().clamp(0, image.height - 1);
 
-    final img.Pixel seedPixel = image.getPixel(cx, cy);
-    final double seedLum = seedPixel.luminance.toDouble();
+    // Усредняем яркость центральной точки образца (радиус 3 пикселя)
+    double seedLum = 0.0;
+    int sampleCount = 0;
+    for (int dy = -2; dy <= 2; dy++) {
+      for (int dx = -2; dx <= 2; dx++) {
+        final int sx = (cx + dx).clamp(0, image.width - 1);
+        final int sy = (cy + dy).clamp(0, image.height - 1);
+        seedLum += image.getPixel(sx, sy).luminance.toDouble();
+        sampleCount++;
+      }
+    }
+    seedLum /= sampleCount;
 
-    // 8 лучей для создания аккуратного полигона без «пилы»
-    const int rayCount = 8;
-    final int minRadius = (math.min(image.width, image.height) * 0.05).toInt();
-    final int maxRadius = (math.min(image.width, image.height) * 0.22).toInt();
-    final List<double> radii = [];
+    const int rayCount = 8; // 8 узлов для быстрой и чистой ручной подгонки
+    final int minR = (math.min(image.width, image.height) * 0.03).toInt().clamp(8, 60);
+    final int maxR = (math.min(image.width, image.height) * 0.28).toInt();
+
+    final List<double> distances = [];
 
     for (int i = 0; i < rayCount; i++) {
       final double angle = (2 * math.pi / rayCount) * i;
       final double cosA = math.cos(angle);
       final double sinA = math.sin(angle);
 
-      int stopDist = maxRadius;
-      for (int r = minRadius; r < maxRadius; r += 3) {
-        final int rx = (cx + r * cosA).toInt();
-        final int ry = (cy + r * sinA).toInt();
+      int stopDist = maxR;
+      for (int r = minR; r < maxR; r += 2) {
+        final int px = (cx + r * cosA).toInt();
+        final int py = (cy + r * sinA).toInt();
 
-        if (rx < 0 || rx >= image.width || ry < 0 || ry >= image.height) {
+        if (px < 0 || px >= image.width || py < 0 || py >= image.height) {
           stopDist = r;
           break;
         }
 
-        final double lum = image.getPixel(rx, ry).luminance.toDouble();
-        // Детекция резкого выхода на светлый фон бумаги (> 200) или скачка яркости
-        if ((lum - seedLum) > 30.0 || lum > 205.0) {
+        final double currentLum = image.getPixel(px, py).luminance.toDouble();
+
+        // Срабатывание на границу листа: переход в ярко-белый фон (> 195) или скачок контраста
+        if (currentLum > 195.0 || (currentLum - seedLum) > 35.0) {
           stopDist = r;
           break;
         }
       }
-      radii.add(stopDist.toDouble());
+      distances.add(stopDist.toDouble());
     }
 
-    // Сглаживание радиусов соседних лучей (устранение колючих выбросов)
-    final List<double> smoothedRadii = List.filled(rayCount, 0.0);
+    // Сглаживание расстояний соседних лучей (ликвидация выбросов)
+    final List<Offset> contour = [];
     for (int i = 0; i < rayCount; i++) {
-      final prev = radii[(i - 1 + rayCount) % rayCount];
-      final curr = radii[i];
-      final next = radii[(i + 1) % rayCount];
-      smoothedRadii[i] = (prev + curr * 2.0 + next) / 4.0;
-    }
+      final double prev = distances[(i - 1 + rayCount) % rayCount];
+      final double curr = distances[i];
+      final double next = distances[(i + 1) % rayCount];
+      final double smoothed = (prev + curr * 2.0 + next) / 4.0;
 
-    final List<Offset> polygon = [];
-    for (int i = 0; i < rayCount; i++) {
       final double angle = (2 * math.pi / rayCount) * i;
-      final double r = smoothedRadii[i];
-      final double px = ((cx + r * math.cos(angle)) / image.width).clamp(0.0, 1.0);
-      final double py = ((cy + r * math.sin(angle)) / image.height).clamp(0.0, 1.0);
-      polygon.add(Offset(px, py));
+      final double normPointX = ((cx + smoothed * math.cos(angle)) / image.width).clamp(0.0, 1.0);
+      final double normPointY = ((cy + smoothed * math.sin(angle)) / image.height).clamp(0.0, 1.0);
+      contour.add(Offset(normPointX, normPointY));
     }
 
-    return polygon;
+    return contour;
   }
 }
