@@ -3,120 +3,67 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 class ContourDetector {
-  /// Высокоточный радиальный детектор границ с оптимизацией RDP до 6-10 ключевых вершин
+  /// Адаптивный поиск границы: ровный 8-узловой полигон без колючих артефактов
   static List<Offset> extractContourAroundPoint({
     required img.Image image,
     required double normX,
     required double normY,
-    double gradientThreshold = 28.0,
   }) {
     final int cx = (normX * image.width).toInt().clamp(0, image.width - 1);
     final int cy = (normY * image.height).toInt().clamp(0, image.height - 1);
 
-    const int rayCount = 32;
-    final int maxRadius = (math.min(image.width, image.height) * 0.32).toInt();
-    final List<Offset> rawPoints = [];
+    final img.Pixel seedPixel = image.getPixel(cx, cy);
+    final double seedLum = seedPixel.luminance.toDouble();
+
+    // 8 лучей для создания аккуратного полигона без «пилы»
+    const int rayCount = 8;
+    final int minRadius = (math.min(image.width, image.height) * 0.05).toInt();
+    final int maxRadius = (math.min(image.width, image.height) * 0.22).toInt();
+    final List<double> radii = [];
 
     for (int i = 0; i < rayCount; i++) {
       final double angle = (2 * math.pi / rayCount) * i;
       final double cosA = math.cos(angle);
       final double sinA = math.sin(angle);
 
-      int bestDist = maxRadius;
-      double maxGrad = 0.0;
+      int stopDist = maxRadius;
+      for (int r = minRadius; r < maxRadius; r += 3) {
+        final int rx = (cx + r * cosA).toInt();
+        final int ry = (cy + r * sinA).toInt();
 
-      // Анализируем градиент вдоль луча с шагом в 2 пикселя
-      for (int r = 12; r < maxRadius - 4; r += 2) {
-        final int x1 = (cx + r * cosA).toInt();
-        final int y1 = (cy + r * sinA).toInt();
-        final int x2 = (cx + (r + 4) * cosA).toInt();
-        final int y2 = (cy + (r + 4) * sinA).toInt();
-
-        if (x2 < 0 || x2 >= image.width || y2 < 0 || y2 >= image.height) {
-          bestDist = r;
+        if (rx < 0 || rx >= image.width || ry < 0 || ry >= image.height) {
+          stopDist = r;
           break;
         }
 
-        final double lum1 = image.getPixel(x1, y1).luminance.toDouble();
-        final double lum2 = image.getPixel(x2, y2).luminance.toDouble();
-        final double grad = (lum2 - lum1).abs();
-
-        if (grad > gradientThreshold && grad > maxGrad) {
-          maxGrad = grad;
-          bestDist = r + 2;
+        final double lum = image.getPixel(rx, ry).luminance.toDouble();
+        // Детекция резкого выхода на светлый фон бумаги (> 200) или скачка яркости
+        if ((lum - seedLum) > 30.0 || lum > 205.0) {
+          stopDist = r;
+          break;
         }
       }
-
-      final double px = ((cx + bestDist * cosA) / image.width).clamp(0.0, 1.0);
-      final double py = ((cy + bestDist * sinA) / image.height).clamp(0.0, 1.0);
-      rawPoints.add(Offset(px, py));
+      radii.add(stopDist.toDouble());
     }
 
-    // Упрощаем замкнутый контур алгоритмом RDP (снижаем число узлов до ключевых)
-    return _simplifyPolygonRDP(rawPoints, epsilon: 0.015);
-  }
-
-  static List<Offset> _simplifyPolygonRDP(List<Offset> points, {required double epsilon}) {
-    if (points.length <= 6) return points;
-
-    // Вспомогательный алгоритм Рамера-Дугласа-Пекера для замкнутых контуров
-    final List<Offset> result = [];
-    int maxIdx = 0;
-    double maxDist = 0.0;
-
-    for (int i = 1; i < points.length; i++) {
-      final double dist = (points[i] - points[0]).distance;
-      if (dist > maxDist) {
-        maxDist = dist;
-        maxIdx = i;
-      }
+    // Сглаживание радиусов соседних лучей (устранение колючих выбросов)
+    final List<double> smoothedRadii = List.filled(rayCount, 0.0);
+    for (int i = 0; i < rayCount; i++) {
+      final prev = radii[(i - 1 + rayCount) % rayCount];
+      final curr = radii[i];
+      final next = radii[(i + 1) % rayCount];
+      smoothedRadii[i] = (prev + curr * 2.0 + next) / 4.0;
     }
 
-    final List<Offset> part1 = _rdpRecursive(points.sublist(0, maxIdx + 1), epsilon);
-    final List<Offset> part2 = _rdpRecursive(points.sublist(maxIdx), epsilon);
-
-    result.addAll(part1.take(part1.length - 1));
-    result.addAll(part2);
-
-    // Если точек осталось слишком мало — гарантируем минимум 6 для плавности круга
-    if (result.length < 6) {
-      final int step = math.max(1, points.length ~/ 8);
-      return [for (int i = 0; i < points.length; i += step) points[i]];
+    final List<Offset> polygon = [];
+    for (int i = 0; i < rayCount; i++) {
+      final double angle = (2 * math.pi / rayCount) * i;
+      final double r = smoothedRadii[i];
+      final double px = ((cx + r * math.cos(angle)) / image.width).clamp(0.0, 1.0);
+      final double py = ((cy + r * math.sin(angle)) / image.height).clamp(0.0, 1.0);
+      polygon.add(Offset(px, py));
     }
 
-    return result;
-  }
-
-  static List<Offset> _rdpRecursive(List<Offset> points, double epsilon) {
-    if (points.length < 3) return points;
-
-    double maxDist = 0.0;
-    int index = 0;
-    final Offset start = points.first;
-    final Offset end = points.last;
-
-    for (int i = 1; i < points.length - 1; i++) {
-      final double d = _perpendicularDistance(points[i], start, end);
-      if (d > maxDist) {
-        maxDist = d;
-        index = i;
-      }
-    }
-
-    if (maxDist > epsilon) {
-      final List<Offset> left = _rdpRecursive(points.sublist(0, index + 1), epsilon);
-      final List<Offset> right = _rdpRecursive(points.sublist(index), epsilon);
-      return [...left.take(left.length - 1), ...right];
-    } else {
-      return [start, end];
-    }
-  }
-
-  static double _perpendicularDistance(Offset p, Offset a, Offset b) {
-    final double dx = b.dx - a.dx;
-    final double dy = b.dy - a.dy;
-    final double mag = math.sqrt(dx * dx + dy * dy);
-    if (mag == 0.0) return (p - a).distance;
-    return ((p.dx - a.dx) * dy - (p.dy - a.dy) * dx).abs() / mag;
+    return polygon;
   }
 }
