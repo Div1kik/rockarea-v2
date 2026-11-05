@@ -80,31 +80,21 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Экспорт данных: ${record.id}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
-            const SizedBox(height: 4),
-            const Text('Выберите необходимый тип выгрузки:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+            Text('Экспорт: ${record.id}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
             const SizedBox(height: 14),
             ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.straighten, color: Color(0xFF2563EB)),
-              ),
-              title: const Text('Ведомость только площадей (Геометрия)', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Изолированная таблица размеров и калибровки', style: TextStyle(fontSize: 11)),
+              leading: const Icon(Icons.table_chart_outlined, color: Color(0xFF2563EB)),
+              title: const Text('Ведомость «Площади»', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Только номера, наименования и площади (см²)', style: TextStyle(fontSize: 11)),
               onTap: () {
                 Navigator.pop(ctx);
                 ExportService.exportGeometryOnly(context: context, record: record, shareImmediately: false);
               },
             ),
             ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.calculate_outlined, color: Color(0xFF059669)),
-              ),
-              title: const Text('Полный протокол ГОСТ 24941-81', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Ведомость со всеми 13 столбцами и формулами', style: TextStyle(fontSize: 11)),
+              leading: const Icon(Icons.calculate_outlined, color: Color(0xFF059669)),
+              title: const Text('Таблица «Расчёт нагрузки»', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Полный протокол с прочностью и формулами', style: TextStyle(fontSize: 11)),
               onTap: () {
                 Navigator.pop(ctx);
                 final List<SampleStrengthData> items = record.samples.map((s) {
@@ -159,7 +149,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
           : _records.isEmpty
-              ? const Center(child: Text('Журнал пуст. Проведите разметку образцов на фото.', style: TextStyle(color: Color(0xFF94A3B8))))
+              ? const Center(child: Text('Журнал пуст.', style: TextStyle(color: Color(0xFF94A3B8))))
               : ListView.builder(
                   padding: const EdgeInsets.all(12),
                   itemCount: _records.length,
@@ -190,7 +180,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB), size: 22),
-                                  tooltip: 'Сохранить таблицы',
+                                  tooltip: 'Экспорт',
                                   onPressed: () => _showRecordExportMenu(rec),
                                 ),
                                 IconButton(
@@ -212,14 +202,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('Образцов в серии: ${rec.samples.length}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
-                                      Text('Общая площадь: ${rec.totalAreaCm2.toStringAsFixed(2)} см²', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                      Text('Образцов: ${rec.samples.length}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
                                       if (hasLoads)
                                         Container(
                                           margin: const EdgeInsets.only(top: 4),
                                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                           decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(4)),
-                                          child: const Text('Расчёт прочности выполнен', style: TextStyle(fontSize: 10, color: Color(0xFF059669), fontWeight: FontWeight.bold)),
+                                          child: const Text('Расчёт нагрузки выполнен', style: TextStyle(fontSize: 10, color: Color(0xFF059669), fontWeight: FontWeight.bold)),
                                         ),
                                     ],
                                   ),
@@ -236,8 +225,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                     side: const BorderSide(color: Color(0xFFCBD5E1)),
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                   ),
-                                  icon: const Icon(Icons.straighten, size: 14),
-                                  label: const Text('Геометрия', style: TextStyle(fontSize: 11)),
+                                  icon: const Icon(Icons.table_chart_outlined, size: 14),
+                                  label: const Text('Площади', style: TextStyle(fontSize: 11)),
                                   onPressed: () => ExportService.exportGeometryOnly(context: context, record: rec, shareImmediately: false),
                                 ),
                                 const SizedBox(width: 8),
@@ -249,7 +238,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
                                   icon: const Icon(Icons.calculate_outlined, size: 16),
-                                  label: Text(hasLoads ? 'Открыть расчёт' : 'Внести нагрузки (P)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  label: Text(hasLoads ? 'Расчёт нагрузки' : 'Внести нагрузки (P)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                   onPressed: () => _openStrengthForRecord(rec),
                                 ),
                               ],
