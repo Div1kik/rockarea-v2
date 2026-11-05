@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../core/archive_service.dart';
-import '../../core/export_service.dart';
+import '../strength/strength_calculator_sheet.dart';
 
 class ArchiveScreen extends StatefulWidget {
   const ArchiveScreen({super.key});
@@ -12,8 +12,7 @@ class ArchiveScreen extends StatefulWidget {
 
 class _ArchiveScreenState extends State<ArchiveScreen> {
   List<TestRecord> _records = [];
-  final Set<String> _selectedIds = {};
-  bool _loading = true;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -22,245 +21,156 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   }
 
   Future<void> _load() async {
+    setState(() => _isLoading = true);
     final data = await ArchiveService.loadRecords();
-    if (mounted) {
-      setState(() {
-        _records = data;
-        _selectedIds.clear();
-        _loading = false;
-      });
-    }
-  }
-
-  void _toggleSelection(String id) {
     setState(() {
-      if (_selectedIds.contains(id)) {
-        _selectedIds.remove(id);
-      } else {
-        _selectedIds.add(id);
-      }
+      _records = data;
+      _isLoading = false;
     });
   }
 
-  void _selectAll() {
-    setState(() {
-      if (_selectedIds.length == _records.length) {
-        _selectedIds.clear();
-      } else {
-        _selectedIds.addAll(_records.map((r) => r.id));
-      }
-    });
-  }
+  void _openStrengthForRecord(TestRecord record) {
+    final List<SampleStrengthData> items = [];
 
-  Future<void> _exportSelected() async {
-    final selectedRecords = _records.where((r) => _selectedIds.contains(r.id)).toList();
-    if (selectedRecords.isEmpty) return;
+    for (int i = 0; i < record.samples.length; i++) {
+      final s = record.samples[i];
+      final raw = s.name.split(RegExp(r'\s+'));
 
-    final savedPath = await ExportService.exportSelectedRecordsToCsv(selectedRecords);
-    if (!mounted) return;
-
-    if (savedPath != null) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: Colors.white,
-          title: const Row(
-            children: [
-              Icon(Icons.check_circle, color: Color(0xFF2563EB)),
-              SizedBox(width: 8),
-              Text('Файл сохранен', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-            ],
-          ),
-          content: Text(
-            'Таблица успешно сохранена на устройство:\n\n$savedPath',
-            style: const TextStyle(fontSize: 13, color: Color(0xFF475569)),
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white),
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Понятно'),
-            ),
-          ],
-        ),
-      );
+      items.add(SampleStrengthData(
+        part1: raw.isNotEmpty ? raw[0] : 'БАМ',
+        part2: raw.length > 1 ? raw[1] : '1',
+        part3: raw.length > 2 ? raw[2] : '${i + 1}',
+        areaCm2: s.areaCm2,
+        loadKn: s.loadKn,
+        condition: s.condition,
+      ));
     }
-  }
 
-  void _showImagePreview(String imagePath, String title) {
-    if (!File(imagePath).existsSync()) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(12),
-        child: Stack(
-          alignment: Alignment.topRight,
-          children: [
-            InteractiveViewer(
-              maxScale: 4.0,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(File(imagePath), fit: BoxFit.contain),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white, size: 28),
-              onPressed: () => Navigator.pop(ctx),
-            ),
-          ],
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StrengthCalculatorSheet(
+          title: 'Расчёт: ${record.id}',
+          initialSamples: items,
+          onSaved: (updated) async {
+            for (int i = 0; i < updated.length; i++) {
+              record.samples[i].name = '${updated[i].part1} ${updated[i].part2} ${updated[i].part3}';
+              record.samples[i].loadKn = updated[i].loadKn;
+              record.samples[i].condition = updated[i].condition;
+              record.samples[i].tensileMpa = updated[i].tensileStrengthMpa;
+              record.samples[i].compMpa = updated[i].compStrengthMpa;
+            }
+            await ArchiveService.updateRecord(record);
+            _load();
+          },
         ),
       ),
     );
   }
 
+  Future<void> _delete(String id) async {
+    await ArchiveService.deleteRecord(id);
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: Text(
-          _selectedIds.isEmpty ? 'Журнал испытаний' : 'Выбрано: ${_selectedIds.length}',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-        ),
+        title: const Text('Журнал испытаний', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
         backgroundColor: Colors.white,
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
-        actions: [
-          if (_records.isNotEmpty)
-            IconButton(
-              icon: Icon(
-                _selectedIds.length == _records.length ? Icons.deselect : Icons.select_all,
-                color: const Color(0xFF2563EB),
-              ),
-              tooltip: 'Выбрать все',
-              onPressed: _selectAll,
-            ),
-          if (_selectedIds.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.file_download_outlined, color: Color(0xFFF97316)),
-              tooltip: 'Экспорт в CSV',
-              onPressed: _exportSelected,
-            ),
-        ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFF97316)))
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
           : _records.isEmpty
-              ? const Center(
-                  child: Text('Архив пуст.\nВыполните серию измерений и нажмите «В журнал».',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14)),
-                )
+              ? const Center(child: Text('Журнал пуст. Проведите разметку образцов на фото.', style: TextStyle(color: Color(0xFF94A3B8))))
               : ListView.builder(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(12),
                   itemCount: _records.length,
-                  itemBuilder: (context, i) {
-                    final rec = _records[i];
-                    final isChecked = _selectedIds.contains(rec.id);
+                  itemBuilder: (ctx, idx) {
+                    final rec = _records[idx];
+                    final hasLoads = rec.samples.any((s) => s.loadKn > 0);
 
-                    return Container(
+                    return Card(
+                      color: Colors.white,
+                      elevation: 1,
                       margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: isChecked ? const Color(0xFFF97316) : const Color(0xFFE2E8F0),
-                          width: isChecked ? 2 : 1,
-                        ),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
-                        ],
-                      ),
-                      child: ExpansionTile(
-                        leading: Row(
-                          mainAxisSize: MainAxisSize.min,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Checkbox(
-                              value: isChecked,
-                              activeColor: const Color(0xFFF97316),
-                              onChanged: (_) => _toggleSelection(rec.id),
-                            ),
-                            GestureDetector(
-                              onTap: () => _showImagePreview(rec.imagePath, rec.id),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
-                                child: File(rec.imagePath).existsSync()
-                                    ? Image.file(File(rec.imagePath), width: 44, height: 44, fit: BoxFit.cover)
-                                    : Container(
-                                        width: 44,
-                                        height: 44,
-                                        color: const Color(0xFFE2E8F0),
-                                        child: const Icon(Icons.broken_image, size: 20, color: Color(0xFF94A3B8)),
-                                      ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        title: Text(rec.id, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A), fontSize: 14)),
-                        subtitle: Text('${rec.date} • Образцов: ${rec.samples.length}',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                        trailing: Text('${rec.totalAreaCm2.toStringAsFixed(2)} см²',
-                            style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                        children: [
-                          const Divider(color: Color(0xFFF1F5F9), height: 1),
-                          ...rec.samples.map(
-                            (s) => ListTile(
-                              dense: true,
-                              title: Text(s.name, style: const TextStyle(color: Color(0xFF334155), fontSize: 13, fontWeight: FontWeight.w500)),
-                              subtitle: Text('${s.areaPx.toStringAsFixed(0)} px²',
-                                  style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
-                              trailing: Text('${s.areaCm2.toStringAsFixed(2)} см²',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold, color: Color(0xFFF97316), fontSize: 13)),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            Row(
                               children: [
-                                TextButton.icon(
-                                  onPressed: () => _showImagePreview(rec.imagePath, rec.id),
-                                  icon: const Icon(Icons.fullscreen, size: 16, color: Color(0xFF2563EB)),
-                                  label: const Text('Открыть фото', style: TextStyle(color: Color(0xFF2563EB), fontSize: 12)),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(rec.id, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      Text(rec.date, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                                    ],
+                                  ),
                                 ),
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    await ArchiveService.deleteRecord(rec.id);
-                                    _load();
-                                  },
-                                  icon: const Icon(Icons.delete_outline, size: 16, color: Color(0xFFDC2626)),
-                                  label: const Text('Удалить', style: TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626), size: 20),
+                                  onPressed: () => _delete(rec.id),
                                 ),
                               ],
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                if (File(rec.imagePath).existsSync())
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.file(File(rec.imagePath), width: 60, height: 60, fit: BoxFit.cover),
+                                  ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Образцов в серии: ${rec.samples.length}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
+                                      Text('Общая площадь: ${rec.totalAreaCm2.toStringAsFixed(2)} см²', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                      if (hasLoads)
+                                        Container(
+                                          margin: const EdgeInsets.only(top: 4),
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(4)),
+                                          child: const Text('Расчёт прочности выполнен', style: TextStyle(fontSize: 10, color: Color(0xFF059669), fontWeight: FontWeight.bold)),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 20, color: Color(0xFFF1F5F9)),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF2563EB),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  icon: const Icon(Icons.calculate_outlined, size: 16),
+                                  label: Text(hasLoads ? 'Открыть расчёт' : 'Внести нагрузки (P)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  onPressed: () => _openStrengthForRecord(rec),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   },
                 ),
-      bottomNavigationBar: _selectedIds.isNotEmpty
-          ? Container(
-              padding: const EdgeInsets.all(16),
-              color: Colors.white,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFF97316),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(50),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                icon: const Icon(Icons.file_download_outlined),
-                label: Text('Экспортировать выбранные (${_selectedIds.length}) в CSV',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                onPressed: _exportSelected,
-              ),
-            )
-          : null,
     );
   }
 }
