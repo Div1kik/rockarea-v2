@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import 'archive_service.dart';
 import '../features/strength/strength_calculator_sheet.dart';
 
 class ExportService {
+  /// Прямая запись файла в папку Загрузки телефона
   static Future<File> _writeCsvFile({
     required String filename,
     required String content,
@@ -23,18 +23,18 @@ class ExportService {
     targetDir ??= await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
 
     final file = File('${targetDir.path}/$filename');
-    
-    // Корректный UTF-8 с BOM для гарантированного открытия кириллицы в Excel и Google Таблицах
+
+    // Корректный UTF-8 с байтовым маркером BOM [EF, BB, BF] для открытия без кракозябр
     final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
     await file.writeAsBytes(bytes, flush: true);
     return file;
   }
 
-  /// Экспорт только площадей: Номер, Наименование, Площадь (см2)
+  /// 1. Таблица «Площади» (минималистичная, только нужные столбцы)
   static Future<void> exportGeometryOnly({
     required BuildContext context,
     required TestRecord record,
-    required bool shareImmediately,
+    bool shareImmediately = false,
   }) async {
     final sb = StringBuffer();
     sb.writeln('ВЕДОМОСТЬ ПЛОЩАДЕЙ ОБРАЗЦОВ');
@@ -55,29 +55,25 @@ class ExportService {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF2563EB),
-          content: Text('Таблица сохранена в Загрузки:\n${savedFile.path}'),
-          duration: const Duration(seconds: 3),
+          content: Text('Файл сохранен в Загрузки:\n${savedFile.path}'),
+          duration: const Duration(seconds: 4),
         ),
       );
     }
-
-    if (shareImmediately) {
-      await Share.shareXFiles([XFile(savedFile.path)], text: 'Ведомость площадей');
-    }
   }
 
-  /// Полная таблица: Расчёт нагрузки
+  /// 2. Таблица «Расчёт нагрузки» (полная форма по ГОСТ 24941-81)
   static Future<void> exportGostProtocol({
     required BuildContext context,
     required String seriesId,
     required List<SampleStrengthData> samples,
     required double avgTensile,
     required double avgComp,
-    required bool shareImmediately,
+    bool shareImmediately = false,
   }) async {
     final sb = StringBuffer();
 
-    // Шапка бланка испытаний
+    // 13 столбцов строго по ГОСТ 24941-81
     sb.writeln('№;Шифр (Часть 1);Шифр (Часть 2);Шифр (Часть 3);Скважина;Интервал;Состояние;Литотип;Площадь скола S, см2;Нагрузка P, кН;K;Растяжение, МПа;Ср. растяжение, МПа;Коэф. пересчета;Сжатие Rc, МПа;Ср. сжатие Rc, МПа');
 
     for (int i = 0; i < samples.length; i++) {
@@ -112,14 +108,10 @@ class ExportService {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF059669),
-          content: Text('Расчёт нагрузки сохранён в Загрузки:\n${savedFile.path}'),
-          duration: const Duration(seconds: 3),
+          content: Text('Файл сохранен в Загрузки:\n${savedFile.path}'),
+          duration: const Duration(seconds: 4),
         ),
       );
-    }
-
-    if (shareImmediately) {
-      await Share.shareXFiles([XFile(savedFile.path)], text: 'Расчёт нагрузки образцов');
     }
   }
 }
