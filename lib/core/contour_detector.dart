@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 class ContourDetector {
-  /// Двумерный волновой детектор с фильтрацией внутренних надписей и гравировок
+  /// Двумерный волновой детектор с фильтрацией внутренних надписей, бликов и гравировок
   static List<Offset> extractContourAroundPoint({
     required img.Image image,
     required double normX,
@@ -25,10 +25,8 @@ class ContourDetector {
     final int startX = (normX * w).toInt().clamp(0, w - 1);
     final int startY = (normY * h).toInt().clamp(0, h - 1);
 
-    // Порог чистого белого листа бумаги
     const double paperLuminance = 184.0;
 
-    // Если тапнули прямо в белый фон
     if (small.getPixel(startX, startY).luminance > paperLuminance) {
       return _generateDefaultBox(normX, normY);
     }
@@ -66,8 +64,8 @@ class ContourDetector {
             if (d <= maxDist) {
               final lum = small.getPixel(nx, ny).luminance.toDouble();
 
-              // Не останавливаемся на мелких белых надписях:
-              // Пиксель считается фоном только если вокруг него тоже фон
+              // Игнорируем изолированные белые пиксели текста/бликов:
+              // признаем фон только если впереди устойчивая белая бумага
               bool isPaper = false;
               if (lum > paperLuminance) {
                 int whiteNeighbors = 0;
@@ -95,7 +93,6 @@ class ContourDetector {
       return _generateDefaultBox(normX, normY);
     }
 
-    // Вычисляем центр фигуры
     double sumX = 0, sumY = 0;
     for (final p in objectPixels) {
       sumX += p.x;
@@ -104,7 +101,6 @@ class ContourDetector {
     final double avgX = sumX / objectPixels.length;
     final double avgY = sumY / objectPixels.length;
 
-    // Выделяем краевые граничные пиксели
     final List<math.Point<int>> edgePoints = [];
     for (final p in objectPixels) {
       final int x = p.x;
@@ -118,7 +114,6 @@ class ContourDetector {
       }
     }
 
-    // Равномерный охват по 12 секторам
     const int sectors = 12;
     final List<math.Point<int>?> borderPoints = List.filled(sectors, null);
     final List<double> sectorDist = List.filled(sectors, 0.0);
