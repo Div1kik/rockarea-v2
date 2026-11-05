@@ -40,7 +40,6 @@ jobs:
             find android -name "build.gradle*" -exec sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' {} +
             find android -name "build.gradle*" -exec sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' {} +
 
-            # Гарантируем наличие mavenCentral() во всех блоках repositories
             ROOT_GRADLE="android/build.gradle"
             if [ -f "$ROOT_GRADLE" ]; then
               sed -i 's/google()/google()\n        mavenCentral()/g' "$ROOT_GRADLE"
@@ -51,16 +50,25 @@ jobs:
             fi
           fi
 
+      - name: Set up Fixed Persistent Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          # Генерируем постоянный стандартизированный debug.keystore, если его нет
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkey -v -keystore ~/.android/debug.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=RockArea,C=RU"
+          fi
+
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK (Debug) with network retries
-        run: |
-          # Флаг --stacktrace для детальной диагностики и повтор при сетевом сбое Gradle
-          flutter build apk --debug || flutter build apk --debug
+      - name: Build APK (Debug)
+        run: flutter build apk --debug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RockArea-v2-Debug-APK
+          name: RockArea-v2-Update-APK
           path: build/app/outputs/flutter-apk/app-debug.apk
