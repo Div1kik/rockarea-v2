@@ -94,7 +94,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     _lastLocalTouch = localPos;
     _magnifierScreenPos = e.position;
 
-    // 1. Режим калибровки листа А4
+    // 1. Калибровка А4: захват угла
     if (_isA4CalibMode && _a4Corners.length == 4) {
       for (int i = 0; i < _a4Corners.length; i++) {
         final cornerPos = Offset(_a4Corners[i].dx * canvasSize.width, _a4Corners[i].dy * canvasSize.height);
@@ -108,7 +108,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       return;
     }
 
-    // 2. Вставка нового узла на ребро активного контура
+    // 2. Создание узла на отрезке активного контура
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
       final edgeIdx = PolygonMath.findNearestEdgeIndex(localPos, poly.points, _edgeHitThreshold);
@@ -122,7 +122,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         return;
       }
 
-      // Захват существующего узла
+      // Захват узла
       final nodeHit = PolygonMath.findNearestPoint(localPos, poly.points, 28.0);
       if (nodeHit != -1) {
         setState(() {
@@ -132,7 +132,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         return;
       }
 
-      // Перемещение всей фигуры за тело
+      // Перемещение фигуры
       if (PolygonMath.isPointInside(localPos, poly.points)) {
         setState(() {
           _isDraggingWholeObject = true;
@@ -142,7 +142,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 3. Выбор существующего образца
+    // 3. Выбор полигона
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(localPos, _polygons[i].points)) {
         setState(() {
@@ -154,7 +154,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 4. Автозахват нового образца по свободному полю
+    // 4. Автозахват объекта
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(localPos, canvasSize);
     }
@@ -168,7 +168,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     final Size canvasSize = box.size;
     _magnifierScreenPos = e.position;
 
-    // Перемещение угла А4
+    // Перемещение маркера А4
     if (_isA4CalibMode && _activeA4CornerIndex != -1) {
       setState(() {
         _a4Corners[_activeA4CornerIndex] = Offset(
@@ -381,7 +381,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
           _recalculateScale(canvasSize);
 
-          final bool isManipulatingNode = _activePointIndex != -1 || _activeA4CornerIndex != -1 || _isDraggingWholeObject;
+          final bool isManipulating = _activePointIndex != -1 || _activeA4CornerIndex != -1 || _isDraggingWholeObject;
 
           return Column(
             children: [
@@ -392,8 +392,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       transformationController: _transformController,
                       minScale: 1.0,
                       maxScale: 4.5,
-                      panEnabled: !isManipulatingNode,
-                      scaleEnabled: !isManipulatingNode,
+                      panEnabled: !isManipulating,
+                      scaleEnabled: !isManipulating,
                       child: Center(
                         child: SizedBox(
                           key: _canvasKey,
