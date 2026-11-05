@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+import '../../core/export_service.dart';
 
 class SampleStrengthData {
   String part1;
@@ -76,28 +74,64 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
     return valid.map((s) => s.compStrengthMpa).reduce((a, b) => a + b) / valid.length;
   }
 
-  Future<void> _exportTableFile() async {
-    final StringBuffer sb = StringBuffer();
-    // Шапка в точности как в бланке Excel
-    sb.writeln('№;Шифр пробы (1);Шифр (2);Шифр (3);№ Скважины;Интервал, м;Состояние;Литологический тип;Площадь скола, см2;Разрушающая нагрузка, кН;K;Предел прочности на растяжение, МПа;Коэф. Пересчета;Предел прочности на сжатие ГОСТ 24941-81, МПа');
-
-    for (int i = 0; i < _samples.length; i++) {
-      final s = _samples[i];
-      sb.writeln(
-        '${i + 1};${s.part1};${s.part2};${s.part3};${s.borehole};${s.interval};${s.condition};${s.lithology};'
-        '${s.areaCm2.toStringAsFixed(2)};${s.loadKn.toStringAsFixed(2)};${s.coeffK.toStringAsFixed(2)};'
-        '${s.tensileStrengthMpa.toStringAsFixed(2)};${s.conversionCoeff.toInt()};${s.compStrengthMpa.toStringAsFixed(2)}',
-      );
-    }
-    sb.writeln(';;;;;;;;;СРЕДНЕЕ:;;${_avgTensile.toStringAsFixed(2)};;${_avgComp.toStringAsFixed(2)}');
-
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/GOST_24941_${DateTime.now().millisecondsSinceEpoch}.csv');
-    await file.writeAsString(sb.toString());
-
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      text: 'Ведомость испытаний по ГОСТ 24941-81',
+  void _showExportOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Экспорт протокола ГОСТ 24941-81', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
+            const SizedBox(height: 6),
+            const Text('Таблица сформирована строго 1-в-1 по лабораторному бланку Excel', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(8)),
+                child: const Icon(Icons.download, color: Color(0xFF2563EB)),
+              ),
+              title: const Text('Сохранить в память (Загрузки)', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Прямая запись CSV-файла на устройство', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(ctx);
+                ExportService.exportGostProtocol(
+                  context: context,
+                  seriesId: widget.title,
+                  samples: _samples,
+                  avgTensile: _avgTensile,
+                  avgComp: _avgComp,
+                  shareImmediately: false,
+                );
+              },
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)),
+                child: const Icon(Icons.share_outlined, color: Color(0xFFF97316)),
+              ),
+              title: const Text('Отправить / Поделиться', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Переслать в мессенджер, почту или диск', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(ctx);
+                ExportService.exportGostProtocol(
+                  context: context,
+                  seriesId: widget.title,
+                  samples: _samples,
+                  avgTensile: _avgTensile,
+                  avgComp: _avgComp,
+                  shareImmediately: true,
+                );
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -118,7 +152,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Шифр пробы (через пробелы):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                const Text('Шифр пробы (3 значения через пробел):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                 TextField(
                   controller: cipherCtrl,
                   decoration: const InputDecoration(
@@ -194,8 +228,8 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
         actions: [
           IconButton(
             icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB)),
-            tooltip: 'Экспорт таблицы (.csv)',
-            onPressed: _exportTableFile,
+            tooltip: 'Экспорт / Сохранить протокол',
+            onPressed: _showExportOptions,
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
