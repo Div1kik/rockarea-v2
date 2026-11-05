@@ -6,9 +6,9 @@ class A4Detector {
   /// Эталонная физическая площадь листа А4 (21.0 x 29.7 см)
   static const double a4PhysicalAreaCm2 = 623.7;
 
-  /// Автоматический поиск 4 углов самого яркого и крупного прямоугольника (листа А4)
+  /// Поиск углов листа бумаги с соблюдением физических пропорций А4 (1:1.414)
   static List<Offset> detectA4Corners(img.Image image) {
-    const int maxDim = 300;
+    const int maxDim = 320;
     final double scale = (math.max(image.width, image.height) > maxDim)
         ? maxDim / math.max(image.width, image.height)
         : 1.0;
@@ -21,38 +21,42 @@ class A4Detector {
     final int h = small.height;
 
     int minX = w, maxX = 0, minY = h, maxY = 0;
-    int whitePixelCount = 0;
+    int whiteCount = 0;
 
-    // Ищем границы самого светлого участка кадра (бумага: яркость > 185)
-    for (int y = 0; y < h; y += 2) {
-      for (int x = 0; x < w; x += 2) {
-        final lum = small.getPixel(x, y).luminance;
-        if (lum > 185) {
+    // Ищем область белой бумаги (яркость > 185)
+    for (int y = (h * 0.05).toInt(); y < (h * 0.95).toInt(); y += 2) {
+      for (int x = (w * 0.05).toInt(); x < (w * 0.95).toInt(); x += 2) {
+        if (small.getPixel(x, y).luminance > 185) {
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
           if (y < minY) minY = y;
           if (y > maxY) maxY = y;
-          whitePixelCount++;
+          whiteCount++;
         }
       }
     }
 
-    // Если лист уверенно найден в кадре
-    if (whitePixelCount > (w * h * 0.08) && maxX > minX + 40 && maxY > minY + 40) {
+    // Если белая область листа найдена и не прилипает к краям кадра
+    if (whiteCount > (w * h * 0.10) && (maxX - minX) > (w * 0.3) && (maxY - minY) > (h * 0.3)) {
+      final double l = (minX / w).clamp(0.04, 0.96);
+      final double r = (maxX / w).clamp(0.04, 0.96);
+      final double t = (minY / h).clamp(0.04, 0.96);
+      final double b = (maxY / h).clamp(0.04, 0.96);
+
       return [
-        Offset(minX / w, minY / h), // Левый верхний
-        Offset(maxX / w, minY / h), // Правый верхний
-        Offset(maxX / w, maxY / h), // Правый нижний
-        Offset(minX / w, maxY / h), // Левый нижний
+        Offset(l, t), // Верхний левый
+        Offset(r, t), // Верхний правый
+        Offset(r, b), // Нижний правый
+        Offset(l, b), // Нижний левый
       ];
     }
 
-    // Дефолтная рамка А4 по центру кадра (отступ 15%)
+    // Если фон сложный — выставляем аккуратный прямоугольник по центру кадра с отступом 15%
     return const [
-      Offset(0.15, 0.15),
-      Offset(0.85, 0.15),
-      Offset(0.85, 0.85),
-      Offset(0.15, 0.85),
+      Offset(0.12, 0.15),
+      Offset(0.88, 0.15),
+      Offset(0.88, 0.85),
+      Offset(0.12, 0.85),
     ];
   }
 }
