@@ -1,26 +1,34 @@
 name: rockarea
-description: "Rock Area Core v2 - Лабораторный планиметр керна"
+description: "Planimetry and core geomechanics app (GOST 24941-81)"
 publish_to: 'none'
-
-version: 1.0.9+18
+version: 1.0.9+21
 
 environment:
-  sdk: ^3.5.0
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
+  image: ^4.2.0
   image_picker: ^1.1.2
-  image: ^4.3.0
-  shared_preferences: ^2.3.2
-  path_provider: ^2.1.4
-  share_plus: ^10.1.2
+  path_provider: ^2.1.3
+  share_plus: ^9.0.0
+  shared_preferences: ^2.2.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon.svg"
+  adaptive_icon_background: "#0F172A"
+  adaptive_icon_foreground: "assets/icon.svg"
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/
