@@ -4,15 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 class ContourDetector {
-  /// Классическая сегментация: FloodFill связности + трассировка границы Мура (Moore-Neighbor)
+  /// Сегментация объекта: FloodFill связности + прореженный обход границы
   static List<Offset> extractContourAroundPoint({
     required img.Image image,
     required double normX,
     required double normY,
-    double colorTolerance = 45.0,
+    double colorTolerance = 48.0,
   }) {
-    // 1. Приводим к рабочему разрешению для мгновенного анализа
-    const int maxDim = 480;
+    const int maxDim = 450;
     final double scale = (math.max(image.width, image.height) > maxDim)
         ? maxDim / math.max(image.width, image.height)
         : 1.0;
@@ -27,7 +26,7 @@ class ContourDetector {
     final int startX = (normX * w).toInt().clamp(0, w - 1);
     final int startY = (normY * h).toInt().clamp(0, h - 1);
 
-    // Замер базового цвета образца в точке тапа (усреднение 3x3)
+    // Замер базового цвета в точке клика
     double rAcc = 0, gAcc = 0, bAcc = 0;
     int samples = 0;
     for (int dy = -1; dy <= 1; dy++) {
@@ -45,7 +44,6 @@ class ContourDetector {
     final double seedG = gAcc / samples;
     final double seedB = bAcc / samples;
 
-    // 2. Бинарная сегментация связной области (FloodFill)
     final Uint8List mask = Uint8List(w * h);
     final List<int> queue = <int>[];
 
@@ -57,7 +55,7 @@ class ContourDetector {
     int pixelCount = 0;
     final int maxDist = (math.min(w, h) * 0.45).toInt();
 
-    while (queue.isNotEmpty && pixelCount < 60000) {
+    while (queue.isNotEmpty && pixelCount < 50000) {
       pixelCount++;
       final int idx = queue.removeLast();
       final int cx = idx % w;
@@ -86,9 +84,8 @@ class ContourDetector {
               final double db = p.b.toDouble() - seedB;
               final double diff = math.sqrt(dr * dr + dg * dg + db * db);
 
-              // Пиксель принадлежит объекту, если он не ушел в белый фон бумаги (>190)
-              // и находится в пределах цветового разброса породы
-              if (p.luminance < 192.0 && diff < (colorTolerance * 1.8)) {
+              // Объект: пока не вышли на белый фон бумаги (>185) и цвет не улетел в фон
+              if (p.luminance < 188.0 && diff < (colorTolerance * 2.0)) {
                 mask[nIdx] = 1;
                 queue.add(nIdx);
               }
@@ -99,11 +96,10 @@ class ContourDetector {
     }
 
     if (pixelCount < 30) {
-      return _fallbackBox(normX, normY);
+      return _generateDefaultBox(normX, normY);
     }
 
-    // 3. Трассировка внешнего контура Мура (Moore-Neighbor Tracing)
-    // Находим верхний левый пиксель маски
+    // Трассировка внешнего контура
     int startContourX = -1;
     int startContourY = -1;
     for (int y = minY; y <= maxY; y++) {
@@ -117,23 +113,22 @@ class ContourDetector {
       if (startContourX != -1) break;
     }
 
-    if (startContourX == -1) return _fallbackBox(normX, normY);
+    if (startContourX == -1) return _generateDefaultBox(normX, normY);
 
-    // 8-связные соседи по часовой стрелке
     const List<Point> neighbors = [
       Point(0, -1), Point(1, -1), Point(1, 0), Point(1, 1),
       Point(0, 1), Point(-1, 1), Point(-1, 0), Point(-1, -1),
     ];
 
-    final List<Offset> boundary = [];
+    final List<Offset> rawBoundary = [];
     int currX = startContourX;
     int currY = startContourY;
     int backtrackDir = 0;
-
     int guard = 0;
-    boundary.add(Offset(currX / w, currY / h));
 
-    while (guard < 3000) {
+    rawBoundary.add(Offset(currX / w, currY / h));
+
+    while (guard < 2500) {
       guard++;
       int foundNext = -1;
 
@@ -146,7 +141,7 @@ class ContourDetector {
           currX = nx;
           currY = ny;
           foundNext = checkIdx;
-          backtrackDir = (checkIdx + 5) % 8; // Поворот направления
+          backtrackDir = (checkIdx + 5) % 8;
           break;
         }
       }
@@ -155,55 +150,26 @@ class ContourDetector {
         break;
       }
 
-      boundary.add(Offset(currX / w, currY / h));
+      rawBoundary.add(Offset(currX / w, currY / h));
     }
 
-    if (boundary.length < 8) return _fallbackBox(normX, normY);
+    if (rawBoundary.length < 6) return _generateDefaultBox(normX, normY);
 
-    // 4. Сжатие контура (Ramer-Douglas-Peucker) до 10-14 точных ключевых вершин
-    return _simplifyPolygon(boundary, epsilon: 0.012);
-  }
+    // Равномерная выборка 8-12 точек по периметру, исключающая скучивание в одном месте
+    const int targetPoints = 10;
+    final List<Offset> cleanContour = [];
+    final double step = rawBoundary.length / targetPoints;
 
-  static List<Offset> _simplifyPolygon(List<Offset> points, {required double epsilon}) {
-    if (points.length <= 8) return points;
-
-    // Прореживаем шагом перед RDP
-    final int step = math.max(1, points.length ~/ 120);
-    final List<Offset> sampled = [for (int i = 0; i < points.length; i += step) points[i]];
-
-    // RDP
-    int maxIdx = 0;
-    double maxDist = 0.0;
-    for (int i = 1; i < sampled.length - 1; i++) {
-      final double d = _distToSegment(sampled[i], sampled.first, sampled.last);
-      if (d > maxDist) {
-        maxDist = d;
-        maxIdx = i;
-      }
+    for (int i = 0; i < targetPoints; i++) {
+      final int idx = (i * step).toInt().clamp(0, rawBoundary.length - 1);
+      cleanContour.add(rawBoundary[idx]);
     }
 
-    if (maxDist > epsilon && maxIdx > 0) {
-      final left = _simplifyPolygon(sampled.sublist(0, maxIdx + 1), epsilon: epsilon);
-      final right = _simplifyPolygon(sampled.sublist(maxIdx), epsilon: epsilon);
-      final result = [...left.take(left.length - 1), ...right];
-      return result.length >= 6 ? result : sampled;
-    } else {
-      return [sampled.first, sampled.last];
-    }
+    return cleanContour;
   }
 
-  static double _distToSegment(Offset p, Offset a, Offset b) {
-    final double dx = b.dx - a.dx;
-    final double dy = b.dy - a.dy;
-    final double l2 = dx * dx + dy * dy;
-    if (l2 == 0) return (p - a).distance;
-    final double t = math.max(0.0, math.min(1.0, ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / l2));
-    final Offset proj = Offset(a.dx + t * dx, a.dy + t * dy);
-    return (p - proj).distance;
-  }
-
-  static List<Offset> _fallbackBox(double cx, double cy) {
-    const double r = 0.06;
+  static List<Offset> _generateDefaultBox(double cx, double cy) {
+    const double r = 0.05;
     return [
       Offset(cx - r, cy - r),
       Offset(cx + r, cy - r),
