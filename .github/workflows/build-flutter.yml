@@ -27,7 +27,7 @@ jobs:
           cache: true
 
       - name: Generate Android project structure
-        run: flutter create . --org com.rockarea --platforms android
+        run: flutter create . --project-name rockarea --org com.rockarea --platforms android
 
       - name: Inject Custom RockArea Desktop Icon
         run: |
