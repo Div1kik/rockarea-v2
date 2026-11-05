@@ -17,25 +17,29 @@ class VectorPolygonEditor extends StatefulWidget {
 class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   final GlobalKey _canvasKey = GlobalKey();
   final TransformationController _transformController = TransformationController();
-  final List<SamplePolygon> _polygons = [];
+
+  List<SamplePolygon> _polygons = [];
+  final List<List<SamplePolygon>> _history = [];
 
   int _activePolygonIndex = -1;
   int _activePointIndex = -1;
 
   bool _isA4CalibMode = false;
   List<Offset> _a4Corners = [];
-  int _activeA4CornerIndex = -1;
 
   bool _isDraggingWholeObject = false;
   Offset? _lastLocalTouch;
-  Offset? _magnifierScreenPos;
+  Offset? _currentInspectedPoint;
 
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
   double _pixelsPerCm2 = 520.0;
-  static const double _edgeHitThreshold = 28.0;
-  static const double _a4CornerHitRadius = 55.0;
+  static const double _edgeHitThreshold = 30.0;
+
+  int _pointerCount = 0;
+  bool _isPanningOrZooming = false;
+  Offset? _tapDownPosition;
 
   @override
   void initState() {
@@ -59,6 +63,27 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         _a4Corners = detectedCorners;
       });
     }
+  }
+
+  void _saveToHistory() {
+    final snapshot = _polygons.map((poly) {
+      return SamplePolygon(
+        id: poly.id,
+        points: List<Offset>.from(poly.points),
+      );
+    }).toList();
+    _history.add(snapshot);
+    if (_history.length > 20) _history.removeAt(0);
+  }
+
+  void _undo() {
+    if (_history.isEmpty) return;
+    setState(() {
+      _polygons = _history.removeLast();
+      _activePolygonIndex = _polygons.isNotEmpty ? _polygons.length - 1 : -1;
+      _activePointIndex = -1;
+      _isDraggingWholeObject = false;
+    });
   }
 
   void _recalculateScale(Size canvasSize) {
@@ -85,6 +110,17 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   }
 
   void _onPointerDown(PointerDownEvent e) {
+    _pointerCount++;
+    if (_pointerCount >= 2) {
+      _isPanningOrZooming = true;
+      _activePointIndex = -1;
+      _isDraggingWholeObject = false;
+      return;
+    }
+
+    _isPanningOrZooming = false;
+    _tapDownPosition = e.position;
+
     final localPos = _screenToCanvas(e.position);
     if (localPos == null) return;
 
@@ -92,48 +128,40 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     final Size canvasSize = box.size;
 
     _lastLocalTouch = localPos;
-    _magnifierScreenPos = e.position;
 
-    // 1. Калибровка А4: захват угла
-    if (_isA4CalibMode && _a4Corners.length == 4) {
-      for (int i = 0; i < _a4Corners.length; i++) {
-        final cornerPos = Offset(_a4Corners[i].dx * canvasSize.width, _a4Corners[i].dy * canvasSize.height);
-        if ((cornerPos - localPos).distance <= _a4CornerHitRadius) {
-          setState(() {
-            _activeA4CornerIndex = i;
-          });
-          return;
-        }
-      }
-      return;
-    }
+    // В режиме калибровки листа жесты отданы маркерам углов
+    if (_isA4CalibMode) return;
 
-    // 2. Создание узла на отрезке активного контура
+    // 1. Проверяем касание существующего узла
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
-      final edgeIdx = PolygonMath.findNearestEdgeIndex(localPos, poly.points, _edgeHitThreshold);
+      final nodeHit = PolygonMath.findNearestPoint(localPos, poly.points, 28.0);
+      if (nodeHit != -1) {
+        _saveToHistory();
+        setState(() {
+          _activePointIndex = nodeHit;
+          _currentInspectedPoint = localPos;
+          _isDraggingWholeObject = false;
+        });
+        return;
+      }
 
+      // 2. Добавление узла на ребро контура
+      final edgeIdx = PolygonMath.findNearestEdgeIndex(localPos, poly.points, _edgeHitThreshold);
       if (edgeIdx != -1) {
+        _saveToHistory();
         setState(() {
           poly.points.insert(edgeIdx + 1, localPos);
           _activePointIndex = edgeIdx + 1;
+          _currentInspectedPoint = localPos;
           _isDraggingWholeObject = false;
         });
         return;
       }
 
-      // Захват узла
-      final nodeHit = PolygonMath.findNearestPoint(localPos, poly.points, 28.0);
-      if (nodeHit != -1) {
-        setState(() {
-          _activePointIndex = nodeHit;
-          _isDraggingWholeObject = false;
-        });
-        return;
-      }
-
-      // Перемещение фигуры
+      // 3. Захват для перемещения всей фигуры
       if (PolygonMath.isPointInside(localPos, poly.points)) {
+        _saveToHistory();
         setState(() {
           _isDraggingWholeObject = true;
           _activePointIndex = -1;
@@ -142,7 +170,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 3. Выбор полигона
+    // 4. Выбор существующего полигона
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(localPos, _polygons[i].points)) {
         setState(() {
@@ -153,32 +181,16 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         return;
       }
     }
-
-    // 4. Автозахват объекта
-    if (_decodedImage != null && !_isProcessing) {
-      _autoDetectObjectAt(localPos, canvasSize);
-    }
   }
 
   void _onPointerMove(PointerMoveEvent e) {
+    if (_isPanningOrZooming || _pointerCount > 1) return;
+
     final localPos = _screenToCanvas(e.position);
     if (localPos == null) return;
 
     final RenderBox box = _canvasKey.currentContext!.findRenderObject() as RenderBox;
     final Size canvasSize = box.size;
-    _magnifierScreenPos = e.position;
-
-    // Перемещение маркера А4
-    if (_isA4CalibMode && _activeA4CornerIndex != -1) {
-      setState(() {
-        _a4Corners[_activeA4CornerIndex] = Offset(
-          (localPos.dx / canvasSize.width).clamp(0.0, 1.0),
-          (localPos.dy / canvasSize.height).clamp(0.0, 1.0),
-        );
-      });
-      _recalculateScale(canvasSize);
-      return;
-    }
 
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
@@ -186,6 +198,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       if (_activePointIndex != -1 && _activePointIndex < poly.points.length) {
         setState(() {
           poly.points[_activePointIndex] = localPos;
+          _currentInspectedPoint = localPos;
         });
       } else if (_isDraggingWholeObject && _lastLocalTouch != null) {
         final delta = localPos - _lastLocalTouch!;
@@ -202,18 +215,46 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     _lastLocalTouch = localPos;
   }
 
-  void _handlePointerEnd() {
-    setState(() {
-      _activePointIndex = -1;
-      _activeA4CornerIndex = -1;
-      _isDraggingWholeObject = false;
-      _magnifierScreenPos = null;
-      _lastLocalTouch = null;
-    });
+  void _onPointerUp(PointerUpEvent e) {
+    _pointerCount = (_pointerCount - 1).clamp(0, 5);
+
+    // Автозахват объекта срабатывает СТРОГО на чистом одиночном тапе (без смещения и без второго пальца)
+    if (!_isPanningOrZooming && _pointerCount == 0 && _tapDownPosition != null && !_isA4CalibMode) {
+      final double travel = (e.position - _tapDownPosition!).distance;
+      if (travel < 10.0 && _activePointIndex == -1 && !_isDraggingWholeObject) {
+        final localPos = _screenToCanvas(e.position);
+        if (localPos != null && _decodedImage != null && !_isProcessing) {
+          final RenderBox box = _canvasKey.currentContext!.findRenderObject() as RenderBox;
+          // Проверяем, не ткнули ли внутрь уже существующего полигона
+          bool clickedInsideExisting = false;
+          for (final p in _polygons) {
+            if (PolygonMath.isPointInside(localPos, p.points)) {
+              clickedInsideExisting = true;
+              break;
+            }
+          }
+          if (!clickedInsideExisting) {
+            _autoDetectObjectAt(localPos, box.size);
+          }
+        }
+      }
+    }
+
+    if (_pointerCount == 0) {
+      setState(() {
+        _activePointIndex = -1;
+        _isDraggingWholeObject = false;
+        _currentInspectedPoint = null;
+        _lastLocalTouch = null;
+        _tapDownPosition = null;
+        _isPanningOrZooming = false;
+      });
+    }
   }
 
   void _autoDetectObjectAt(Offset touch, Size canvasSize) {
     setState(() => _isProcessing = true);
+    _saveToHistory();
 
     final normX = (touch.dx / canvasSize.width).clamp(0.0, 1.0);
     final normY = (touch.dy / canvasSize.height).clamp(0.0, 1.0);
@@ -339,10 +380,16 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.undo, color: Color(0xFF475569)),
+            tooltip: 'Отменить действие',
+            onPressed: _history.isNotEmpty ? _undo : null,
+          ),
           TextButton.icon(
             onPressed: () => setState(() {
               _isA4CalibMode = !_isA4CalibMode;
               _activePointIndex = -1;
+              _isDraggingWholeObject = false;
             }),
             icon: Icon(Icons.crop_free, size: 18, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF64748B)),
             label: Text(
@@ -363,11 +410,14 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
             icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
             tooltip: 'Удалить активный объект',
             onPressed: _activePolygonIndex != -1
-                ? () => setState(() {
+                ? () {
+                    _saveToHistory();
+                    setState(() {
                       _polygons.removeAt(_activePolygonIndex);
                       _activePolygonIndex = _polygons.isNotEmpty ? _polygons.length - 1 : -1;
                       _activePointIndex = -1;
-                    })
+                    });
+                  }
                 : null,
           ),
         ],
@@ -381,7 +431,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
           _recalculateScale(canvasSize);
 
-          final bool isManipulating = _activePointIndex != -1 || _activeA4CornerIndex != -1 || _isDraggingWholeObject;
+          final bool isManipulatingNode = _activePointIndex != -1 || _isDraggingWholeObject;
 
           return Column(
             children: [
@@ -392,8 +442,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       transformationController: _transformController,
                       minScale: 1.0,
                       maxScale: 4.5,
-                      panEnabled: !isManipulating,
-                      scaleEnabled: !isManipulating,
+                      panEnabled: !_isA4CalibMode && !isManipulatingNode,
+                      scaleEnabled: !_isA4CalibMode && !isManipulatingNode,
                       child: Center(
                         child: SizedBox(
                           key: _canvasKey,
@@ -401,17 +451,19 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           height: canvasSize.height,
                           child: Stack(
                             fit: StackFit.expand,
+                            clipBehavior: Clip.none,
                             children: [
                               Image.file(File(widget.imagePath), fit: BoxFit.fill),
 
+                              // Рамка А4
                               if (_isA4CalibMode && _a4Corners.length == 4)
                                 CustomPaint(
-                                  painter: _A4CalibPainter(
+                                  painter: _A4FrameOnlyPainter(
                                     corners: _a4Corners.map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height)).toList(),
-                                    activeCornerIndex: _activeA4CornerIndex,
                                   ),
                                 ),
 
+                              // Полигоны
                               CustomPaint(
                                 painter: _CleanPolygonPainter(
                                   polygons: _polygons,
@@ -419,38 +471,112 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                   activePointIndex: _activePointIndex,
                                 ),
                               ),
+
+                              // Отдельные интерактивные маркеры углов листа А4
+                              if (_isA4CalibMode && _a4Corners.length == 4)
+                                for (int i = 0; i < _a4Corners.length; i++)
+                                  Positioned(
+                                    left: _a4Corners[i].dx * canvasSize.width - 24,
+                                    top: _a4Corners[i].dy * canvasSize.height - 24,
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onPanUpdate: (details) {
+                                        setState(() {
+                                          final currentX = _a4Corners[i].dx * canvasSize.width + details.delta.dx;
+                                          final currentY = _a4Corners[i].dy * canvasSize.height + details.delta.dy;
+                                          _a4Corners[i] = Offset(
+                                            (currentX / canvasSize.width).clamp(0.0, 1.0),
+                                            (currentY / canvasSize.height).clamp(0.0, 1.0),
+                                          );
+                                          _currentInspectedPoint = Offset(currentX, currentY);
+                                        });
+                                        _recalculateScale(canvasSize);
+                                      },
+                                      onPanEnd: (_) => setState(() => _currentInspectedPoint = null),
+                                      child: Container(
+                                        width: 48,
+                                        height: 48,
+                                        alignment: Alignment.center,
+                                        child: Container(
+                                          width: 22,
+                                          height: 22,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF2563EB),
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: Colors.white, width: 3),
+                                            boxShadow: const [
+                                              BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                             ],
                           ),
                         ),
                       ),
                     ),
 
-                    Positioned.fill(
-                      child: Listener(
-                        behavior: HitTestBehavior.translucent,
-                        onPointerDown: _onPointerDown,
-                        onPointerMove: _onPointerMove,
-                        onPointerUp: (_) => _handlePointerEnd(),
-                        onPointerCancel: (_) => _handlePointerEnd(),
+                    // Сенсорный слой для добавления узлов и перемещения полигонов
+                    if (!_isA4CalibMode)
+                      Positioned.fill(
+                        child: Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: _onPointerDown,
+                          onPointerMove: _onPointerMove,
+                          onPointerUp: _onPointerUp,
+                          onPointerCancel: (e) {
+                            _pointerCount = 0;
+                            setState(() {
+                              _activePointIndex = -1;
+                              _isDraggingWholeObject = false;
+                              _currentInspectedPoint = null;
+                            });
+                          },
+                        ),
                       ),
-                    ),
 
-                    if (_magnifierScreenPos != null && (_activePointIndex != -1 || _activeA4CornerIndex != -1))
+                    // Чёткая лупа-прицел (HUD) в верхнем правом углу экрана
+                    if (_currentInspectedPoint != null && _decodedImage != null)
                       Positioned(
-                        left: (_magnifierScreenPos!.dx - 55).clamp(10.0, constraints.maxWidth - 120.0),
-                        top: (_magnifierScreenPos!.dy - 145).clamp(10.0, constraints.maxHeight - 120.0),
-                        child: RawMagnifier(
-                          decoration: const MagnifierDecoration(
-                            shape: CircleBorder(
-                              side: BorderSide(color: Color(0xFFF97316), width: 3),
-                            ),
-                            shadows: [
-                              BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 4)),
+                        top: 16,
+                        right: 16,
+                        child: Container(
+                          width: 130,
+                          height: 130,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFFF97316), width: 3),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black38, blurRadius: 10, offset: Offset(0, 4)),
                             ],
                           ),
-                          size: const Size(110, 110),
-                          magnificationScale: 2.2,
-                          focalPointOffset: const Offset(0, 90),
+                          child: ClipOval(
+                            child: Stack(
+                              children: [
+                                _DirectCropMagnifier(
+                                  imageFile: File(widget.imagePath),
+                                  normPoint: Offset(
+                                    _currentInspectedPoint!.dx / canvasSize.width,
+                                    _currentInspectedPoint!.dy / canvasSize.height,
+                                  ),
+                                ),
+                                // Прицельное перекрестие
+                                Center(
+                                  child: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: const Color(0xFFF97316), width: 2),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
 
@@ -463,7 +589,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ),
               ),
 
-              // Нижняя панель
+              // Нижняя сводная панель
               Container(
                 height: 220,
                 decoration: const BoxDecoration(
@@ -527,7 +653,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                   const Text('Режим калибровки А4',
                                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                                   const SizedBox(height: 4),
-                                  const Text('Подтяните 4 синих маркера по углам листа бумаги на столе.',
+                                  const Text('Перетяните 4 синих маркера строго по углам листа бумаги на столе.',
                                       textAlign: TextAlign.center,
                                       style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                                   const SizedBox(height: 8),
@@ -591,7 +717,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                           ],
                                         ),
                                         subtitle: isSelected
-                                            ? const Text('Тап по линии — создать узел. Зажав центр — сдвинуть.',
+                                            ? const Text('Тап по контуру — узел. Зажав центр — сдвинуть.',
                                                 style: TextStyle(fontSize: 10, color: Color(0xFF64748B)))
                                             : null,
                                         trailing: Text('${cm2Area.toStringAsFixed(2)} см²',
@@ -614,11 +740,9 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   }
 }
 
-class _A4CalibPainter extends CustomPainter {
+class _A4FrameOnlyPainter extends CustomPainter {
   final List<Offset> corners;
-  final int activeCornerIndex;
-
-  _A4CalibPainter({required this.corners, required this.activeCornerIndex});
+  _A4FrameOnlyPainter({required this.corners});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -637,23 +761,10 @@ class _A4CalibPainter extends CustomPainter {
       ..close();
 
     canvas.drawPath(path, framePaint);
-
-    final cornerPaint = Paint()..color = const Color(0xFF2563EB);
-    final borderPaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-
-    for (int i = 0; i < corners.length; i++) {
-      final isSelected = (i == activeCornerIndex);
-      final r = isSelected ? 12.0 : 8.5;
-      canvas.drawCircle(corners[i], r, cornerPaint);
-      canvas.drawCircle(corners[i], r, borderPaint);
-    }
   }
 
   @override
-  bool shouldRepaint(covariant _A4CalibPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _A4FrameOnlyPainter oldDelegate) => true;
 }
 
 class _CleanPolygonPainter extends CustomPainter {
@@ -708,4 +819,37 @@ class _CleanPolygonPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CleanPolygonPainter oldDelegate) => true;
+}
+
+/// Высокоточный рендерер кропа оригинального фото без замыливания
+class _DirectCropMagnifier extends StatelessWidget {
+  final File imageFile;
+  final Offset normPoint;
+
+  const _DirectCropMagnifier({required this.imageFile, required this.normPoint});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const double zoom = 2.8;
+        final double halfW = constraints.maxWidth / 2;
+        final double halfH = constraints.maxHeight / 2;
+
+        return ClipRect(
+          child: Transform(
+            transform: Matrix4.identity()
+              ..translate(halfW, halfH)
+              ..scale(zoom)
+              ..translate(-normPoint.dx * constraints.maxWidth, -normPoint.dy * constraints.maxHeight),
+            child: SizedBox(
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+              child: Image.file(imageFile, fit: BoxFit.fill, filterQuality: FilterQuality.none),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
