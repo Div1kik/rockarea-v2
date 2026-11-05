@@ -5,6 +5,7 @@ import '../../core/a4_detector.dart';
 import '../../core/archive_service.dart';
 import '../../core/contour_detector.dart';
 import '../../core/polygon_math.dart';
+import '../strength/strength_calculator_sheet.dart';
 
 class _HistoryItem {
   final List<SamplePolygon> polygons;
@@ -26,6 +27,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   List<SamplePolygon> _polygons = [];
   final List<_HistoryItem> _history = [];
+  final Map<int, SampleStrengthData> _strengthDataMap = {};
 
   int _activePolygonIndex = -1;
   int _activePointIndex = -1;
@@ -38,13 +40,13 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   bool _isDraggingWholeObject = false;
   Offset? _lastLocalTouch;
-  Offset? _currentInspectedPoint;
+  Offset? _targetNodeLocal;
 
   img.Image? _decodedImage;
   bool _isProcessing = false;
 
   double _pixelsPerCm2 = 520.0;
-  static const double _edgeHitThreshold = 16.0;
+  static const double _edgeHitThreshold = 18.0;
 
   int _pointerCount = 0;
   bool _isPanningOrZooming = false;
@@ -142,7 +144,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
     if (_isA4CalibMode) return;
 
-    // Режим «Лассо»: начинаем непрерывную отрисовку
     if (_isLassoMode) {
       _saveToHistory();
       setState(() {
@@ -152,34 +153,31 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       return;
     }
 
-    // 1. Поиск ближайшего узла
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
-      final nodeHit = PolygonMath.findNearestPoint(localPos, poly.points, 22.0);
+      final nodeHit = PolygonMath.findNearestPoint(localPos, poly.points, 24.0);
       if (nodeHit != -1) {
         _saveToHistory();
         setState(() {
           _activePointIndex = nodeHit;
-          _currentInspectedPoint = localPos;
+          _targetNodeLocal = poly.points[nodeHit];
           _isDraggingWholeObject = false;
         });
         return;
       }
 
-      // 2. Вставка узла строго на узком локальном отрезке
       final edgeIdx = PolygonMath.findNearestEdgeIndex(localPos, poly.points, _edgeHitThreshold);
       if (edgeIdx != -1) {
         _saveToHistory();
         setState(() {
           poly.points.insert(edgeIdx + 1, localPos);
           _activePointIndex = edgeIdx + 1;
-          _currentInspectedPoint = localPos;
+          _targetNodeLocal = localPos;
           _isDraggingWholeObject = false;
         });
         return;
       }
 
-      // 3. Захват для перемещения всей фигуры
       if (PolygonMath.isPointInside(localPos, poly.points)) {
         _saveToHistory();
         setState(() {
@@ -190,7 +188,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 4. Выбор существующего полигона
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(localPos, _polygons[i].points)) {
         setState(() {
@@ -227,7 +224,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       if (_activePointIndex != -1 && _activePointIndex < poly.points.length) {
         setState(() {
           poly.points[_activePointIndex] = localPos;
-          _currentInspectedPoint = localPos;
+          _targetNodeLocal = localPos;
         });
       } else if (_isDraggingWholeObject && _lastLocalTouch != null) {
         final delta = localPos - _lastLocalTouch!;
@@ -247,12 +244,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onPointerUp(PointerUpEvent e) {
     _pointerCount = (_pointerCount - 1).clamp(0, 5);
 
-    // Завершение ручного Лассо
     if (_isLassoMode && _lassoPoints.length > 5) {
       final int nextNum = _polygons.length + 1;
       setState(() {
         _polygons.add(SamplePolygon(
-          id: 'Образец №$nextNum',
+          id: 'БАМ 1 $nextNum',
           points: List<Offset>.from(_lassoPoints),
         ));
         _activePolygonIndex = _polygons.length - 1;
@@ -262,7 +258,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       return;
     }
 
-    // Автозахват объекта на чистом одиночном клике
     if (!_isPanningOrZooming && _pointerCount == 0 && _tapDownPosition != null && !_isA4CalibMode && !_isLassoMode) {
       final double travel = (e.position - _tapDownPosition!).distance;
       if (travel < 10.0 && _activePointIndex == -1 && !_isDraggingWholeObject) {
@@ -287,7 +282,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       setState(() {
         _activePointIndex = -1;
         _isDraggingWholeObject = false;
-        _currentInspectedPoint = null;
+        _targetNodeLocal = null;
         _lastLocalTouch = null;
         _tapDownPosition = null;
         _isPanningOrZooming = false;
@@ -317,12 +312,48 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }).toList();
 
       _polygons.add(SamplePolygon(
-        id: 'Образец №$nextNum',
+        id: 'БАМ 1 $nextNum',
         points: points,
       ));
       _activePolygonIndex = _polygons.length - 1;
       _activePointIndex = -1;
     });
+  }
+
+  void _openStrengthCalculator() {
+    final List<SampleStrengthData> items = [];
+
+    for (int i = 0; i < _polygons.length; i++) {
+      final p = _polygons[i];
+      final area = PolygonMath.computeShoelaceArea(p.points) / _pixelsPerCm2;
+      final raw = p.id.split(RegExp(r'\s+'));
+
+      final existing = _strengthDataMap[i];
+      items.add(SampleStrengthData(
+        part1: existing?.part1 ?? (raw.isNotEmpty ? raw[0] : 'БАМ'),
+        part2: existing?.part2 ?? (raw.length > 1 ? raw[1] : '1'),
+        part3: existing?.part3 ?? (raw.length > 2 ? raw[2] : '${i + 1}'),
+        areaCm2: area,
+        loadKn: existing?.loadKn ?? 0.0,
+        condition: existing?.condition ?? 'n',
+      ));
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StrengthCalculatorSheet(
+          initialSamples: items,
+          onSaved: () {
+            for (int i = 0; i < items.length; i++) {
+              _strengthDataMap[i] = items[i];
+              _polygons[i].id = '${items[i].part1} ${items[i].part2} ${items[i].part3}';
+            }
+            setState(() {});
+          },
+        ),
+      ),
+    );
   }
 
   void _editSampleName(int index) {
@@ -331,13 +362,13 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
-        title: const Text('Шифр образца', style: TextStyle(color: Color(0xFF0F172A), fontSize: 16, fontWeight: FontWeight.bold)),
+        title: const Text('Шифр образца (например: БАМ 1 1)', style: TextStyle(color: Color(0xFF0F172A), fontSize: 16, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: controller,
           autofocus: true,
           style: const TextStyle(color: Color(0xFF0F172A)),
           decoration: const InputDecoration(
-            hintText: 'Например: Керн 12-А',
+            hintText: 'БАМ 1 1',
             hintStyle: TextStyle(color: Color(0xFF94A3B8)),
             enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFF97316))),
             focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFEA580C), width: 2)),
@@ -423,22 +454,25 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
         actions: [
-          // Кнопка «Отменить» (Undo)
           IconButton(
             icon: const Icon(Icons.undo, color: Color(0xFF475569)),
             tooltip: 'Отменить действие',
             onPressed: _history.isNotEmpty ? _undo : null,
           ),
-          // Кнопка режима «Лассо» (ручная обводка)
+          // Кнопка перехода в таблицу прочности по ГОСТ 24941-81
+          IconButton(
+            icon: const Icon(Icons.calculate_outlined, color: Color(0xFF2563EB)),
+            tooltip: 'Расчёт прочности (ГОСТ 24941-81)',
+            onPressed: _polygons.isNotEmpty ? _openStrengthCalculator : null,
+          ),
           IconButton(
             icon: Icon(Icons.gesture, color: _isLassoMode ? const Color(0xFFF97316) : const Color(0xFF64748B)),
-            tooltip: 'Режим лассо (ручная обводка)',
+            tooltip: 'Режим лассо',
             onPressed: () => setState(() {
               _isLassoMode = !_isLassoMode;
               _isA4CalibMode = false;
             }),
           ),
-          // Кнопка калибровки А4
           TextButton.icon(
             onPressed: () => setState(() {
               _isA4CalibMode = !_isA4CalibMode;
@@ -510,7 +544,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             children: [
                               Image.file(File(widget.imagePath), fit: BoxFit.fill),
 
-                              // Рамка А4
                               if (_isA4CalibMode && _a4Corners.length == 4)
                                 CustomPaint(
                                   painter: _A4FrameOnlyPainter(
@@ -518,7 +551,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                   ),
                                 ),
 
-                              // Полигоны и ручное лассо
                               CustomPaint(
                                 painter: _CleanPolygonPainter(
                                   polygons: _polygons,
@@ -528,7 +560,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                 ),
                               ),
 
-                              // Интерактивные маркеры углов листа А4 (увеличенная зона захвата 64px)
+                              // Интерактивные маркеры углов А4
                               if (_isA4CalibMode && _a4Corners.length == 4)
                                 for (int i = 0; i < _a4Corners.length; i++)
                                   Positioned(
@@ -544,11 +576,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                             (currentX / canvasSize.width).clamp(0.0, 1.0),
                                             (currentY / canvasSize.height).clamp(0.0, 1.0),
                                           );
-                                          _currentInspectedPoint = Offset(currentX, currentY);
+                                          _targetNodeLocal = Offset(currentX, currentY);
                                         });
                                         _recalculateScale(canvasSize);
                                       },
-                                      onPanEnd: (_) => setState(() => _currentInspectedPoint = null),
+                                      onPanEnd: (_) => setState(() => _targetNodeLocal = null),
                                       child: Container(
                                         width: 64,
                                         height: 64,
@@ -575,7 +607,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       ),
                     ),
 
-                    // Сенсорный слой для добавления узлов и лассо
                     if (!_isA4CalibMode)
                       Positioned.fill(
                         child: Listener(
@@ -583,51 +614,54 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           onPointerDown: _onPointerDown,
                           onPointerMove: _onPointerMove,
                           onPointerUp: _onPointerUp,
-                          onPointerCancel: (e) {
+                          onPointerCancel: (_) {
                             _pointerCount = 0;
                             setState(() {
                               _activePointIndex = -1;
                               _isDraggingWholeObject = false;
-                              _currentInspectedPoint = null;
+                              _targetNodeLocal = null;
                             });
                           },
                         ),
                       ),
 
-                    // Чёткая лупа-прицел (HUD) в верхнем правом углу
-                    if (_currentInspectedPoint != null && _decodedImage != null)
+                    // Чёткая лупа-прицел (HUD) с абсолютным совпадением 1:1
+                    if (_targetNodeLocal != null && _decodedImage != null)
                       Positioned(
                         top: 16,
                         right: 16,
                         child: Container(
-                          width: 130,
-                          height: 130,
+                          width: 140,
+                          height: 140,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: Colors.black,
                             shape: BoxShape.circle,
                             border: Border.all(color: const Color(0xFFF97316), width: 3),
                             boxShadow: const [
-                              BoxShadow(color: Colors.black38, blurRadius: 10, offset: Offset(0, 4)),
+                              BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 4)),
                             ],
                           ),
                           child: ClipOval(
                             child: Stack(
+                              alignment: Alignment.center,
                               children: [
-                                _DirectCropMagnifier(
+                                _AccurateHUDMagnifier(
                                   imageFile: File(widget.imagePath),
-                                  normPoint: Offset(
-                                    _currentInspectedPoint!.dx / canvasSize.width,
-                                    _currentInspectedPoint!.dy / canvasSize.height,
-                                  ),
+                                  normX: _targetNodeLocal!.dx / canvasSize.width,
+                                  normY: _targetNodeLocal!.dy / canvasSize.height,
                                 ),
-                                Center(
-                                  child: Container(
-                                    width: 12,
-                                    height: 12,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: const Color(0xFFF97316), width: 2),
-                                    ),
+                                // Прицельное кольцо точно в центре
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(color: Color(0xFFF97316), shape: BoxShape.circle),
+                                ),
+                                Container(
+                                  width: 26,
+                                  height: 26,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFFF97316), width: 1.5),
                                   ),
                                 ),
                               ],
@@ -645,7 +679,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 ),
               ),
 
-              // Нижняя сводная панель
+              // Нижняя панель
               Container(
                 height: 220,
                 decoration: const BoxDecoration(
@@ -843,7 +877,6 @@ class _CleanPolygonPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Отрисовка ручного лассо
     if (lassoPoints.length > 1) {
       final lassoPaint = Paint()
         ..color = const Color(0xFFF97316)
@@ -898,30 +931,39 @@ class _CleanPolygonPainter extends CustomPainter {
   bool shouldRepaint(covariant _CleanPolygonPainter oldDelegate) => true;
 }
 
-class _DirectCropMagnifier extends StatelessWidget {
+/// Высокоточная лупа со строгим совмещением перекрестия 1:1
+class _AccurateHUDMagnifier extends StatelessWidget {
   final File imageFile;
-  final Offset normPoint;
+  final double normX;
+  final double normY;
 
-  const _DirectCropMagnifier({required this.imageFile, required this.normPoint});
+  const _AccurateHUDMagnifier({
+    required this.imageFile,
+    required this.normX,
+    required this.normY,
+  });
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        const double zoom = 2.8;
-        final double halfW = constraints.maxWidth / 2;
-        final double halfH = constraints.maxHeight / 2;
+        const double zoom = 3.5;
+        final double mid = constraints.maxWidth / 2;
 
         return ClipRect(
           child: Transform(
             transform: Matrix4.identity()
-              ..translate(halfW, halfH)
+              ..translate(mid, mid)
               ..scale(zoom)
-              ..translate(-normPoint.dx * constraints.maxWidth, -normPoint.dy * constraints.maxHeight),
+              ..translate(-normX * constraints.maxWidth, -normY * constraints.maxHeight),
             child: SizedBox(
               width: constraints.maxWidth,
               height: constraints.maxHeight,
-              child: Image.file(imageFile, fit: BoxFit.fill, filterQuality: FilterQuality.none),
+              child: Image.file(
+                imageFile,
+                fit: BoxFit.fill,
+                filterQuality: FilterQuality.none,
+              ),
             ),
           ),
         );
