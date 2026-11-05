@@ -5,7 +5,7 @@ import '../../core/a4_detector.dart';
 import '../../core/archive_service.dart';
 import '../../core/contour_detector.dart';
 import '../../core/polygon_math.dart';
-import '../strength/strength_calculator_sheet.dart';
+import 'strength_calculator_sheet.dart';
 
 class _HistoryItem {
   final List<SamplePolygon> polygons;
