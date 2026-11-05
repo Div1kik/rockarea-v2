@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import '../../core/a4_detector.dart';
@@ -16,18 +15,17 @@ class VectorPolygonEditor extends StatefulWidget {
 }
 
 class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
+  final GlobalKey _imageKey = GlobalKey();
   final TransformationController _transformController = TransformationController();
   final List<SamplePolygon> _polygons = [];
 
   int _activePolygonIndex = -1;
   int _activePointIndex = -1;
 
-  // Режим калибровки А4 (скрыт по умолчанию, включается по кнопке)
   bool _showA4Calib = false;
   List<Offset> _a4Corners = [];
   int _activeA4CornerIndex = -1;
 
-  // Состояние перемещения
   bool _isDraggingWholeObject = false;
   Offset? _lastLocalTouch;
   Offset? _screenTouchPos;
@@ -37,12 +35,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   double _pixelsPerCm2 = 520.0;
   static const double _edgeThreshold = 26.0;
-  static const double _cornerHitRadius = 36.0;
+  static const double _cornerHitRadius = 38.0;
 
   @override
   void initState() {
     super.initState();
-    _loadImageAndAutoCalibrate();
+    _loadImageAndCalibrate();
   }
 
   @override
@@ -51,7 +49,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     super.dispose();
   }
 
-  Future<void> _loadImageAndAutoCalibrate() async {
+  Future<void> _loadImageAndCalibrate() async {
     final bytes = await File(widget.imagePath).readAsBytes();
     final decoded = img.decodeImage(bytes);
     if (mounted && decoded != null) {
@@ -75,39 +73,33 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
   }
 
-  /// Преобразование координаты экрана в локальную систему холста с учетом Pinch-To-Zoom
-  Offset _toImageLocal(Offset globalPos, BuildContext context, BoxConstraints constraints, double imgAspect) {
-    final RenderBox box = context.findRenderObject() as RenderBox;
-    final Offset localInViewer = box.globalToLocal(globalPos);
+  /// Прямое и точное преобразование координат экрана в координаты фото
+  Offset? _globalToCanvasLocal(Offset globalPos) {
+    final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
 
-    // Обратная матрица зума InteractiveViewer
+    final Offset localInViewer = box.globalToLocal(globalPos);
     final Matrix4 inverse = Matrix4.inverted(_transformController.value);
     final Offset unscaled = MatrixUtils.transformPoint(inverse, localInViewer);
 
-    final Size canvasSize = _calcCanvasSize(constraints, imgAspect);
-    final double dxOffset = (constraints.maxWidth - canvasSize.width) / 2;
-    final double dyOffset = (constraints.maxHeight - canvasSize.height) / 2;
-
     return Offset(
-      (unscaled.dx - dxOffset).clamp(0.0, canvasSize.width),
-      (unscaled.dy - dyOffset).clamp(0.0, canvasSize.height),
+      unscaled.dx.clamp(0.0, box.size.width),
+      unscaled.dy.clamp(0.0, box.size.height),
     );
   }
 
-  Size _calcCanvasSize(BoxConstraints constraints, double imgAspect) {
-    final screenAspect = constraints.maxWidth / constraints.maxHeight;
-    return (screenAspect > imgAspect)
-        ? Size(constraints.maxHeight * imgAspect, constraints.maxHeight)
-        : Size(constraints.maxWidth, constraints.maxWidth / imgAspect);
-  }
+  void _handleTouchDown(Offset globalPos) {
+    final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
 
-  void _handleTouchDown(Offset globalPos, BuildContext ctx, BoxConstraints constraints, double imgAspect) {
-    final canvasSize = _calcCanvasSize(constraints, imgAspect);
-    final localPos = _toImageLocal(globalPos, ctx, constraints, imgAspect);
+    final localPos = _globalToCanvasLocal(globalPos);
+    if (localPos == null) return;
+
+    final Size canvasSize = box.size;
     _lastLocalTouch = localPos;
     _screenTouchPos = globalPos;
 
-    // 1. Если включен режим калибровки листа А4
+    // 1. Захват углов калибровки листа А4
     if (_showA4Calib && _a4Corners.length == 4) {
       for (int i = 0; i < _a4Corners.length; i++) {
         final cornerPos = Offset(_a4Corners[i].dx * canvasSize.width, _a4Corners[i].dy * canvasSize.height);
@@ -120,13 +112,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 2. Проверяем попадание в контур активного объекта для ДОБАВЛЕНИЯ нового узла
+    // 2. Создание нового узла по тапу на линию контура активного образца
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
       final edgeIdx = PolygonMath.findNearestEdgeIndex(localPos, poly.points, _edgeThreshold);
 
       if (edgeIdx != -1) {
-        // Добавляем узел строго в место касания на отрезке
         setState(() {
           poly.points.insert(edgeIdx + 1, localPos);
           _activePointIndex = edgeIdx + 1;
@@ -135,7 +126,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         return;
       }
 
-      // Проверяем захват уже добавленного узла
+      // Захват существующего узла
       final nodeHit = PolygonMath.findNearestPoint(localPos, poly.points, 24.0);
       if (nodeHit != -1) {
         setState(() {
@@ -145,7 +136,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         return;
       }
 
-      // Если нажатие внутри активной фигуры — режим перемещения всего тела
+      // Перемещение всей фигуры за тело
       if (PolygonMath.isPointInside(localPos, poly.points)) {
         setState(() {
           _isDraggingWholeObject = true;
@@ -155,7 +146,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 3. Выбор другого существующего образца
+    // 3. Выбор существующего образца
     for (int i = _polygons.length - 1; i >= 0; i--) {
       if (PolygonMath.isPointInside(localPos, _polygons[i].points)) {
         setState(() {
@@ -167,15 +158,20 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       }
     }
 
-    // 4. Тап по чистому полю — авто-детектирование нового образца
+    // 4. Автозахват нового образца по свободному тапу
     if (_decodedImage != null && !_isProcessing) {
       _autoDetectObjectAt(localPos, canvasSize);
     }
   }
 
-  void _handleTouchMove(Offset globalPos, BuildContext ctx, BoxConstraints constraints, double imgAspect) {
-    final canvasSize = _calcCanvasSize(constraints, imgAspect);
-    final localPos = _toImageLocal(globalPos, ctx, constraints, imgAspect);
+  void _handleTouchMove(Offset globalPos) {
+    final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+
+    final localPos = _globalToCanvasLocal(globalPos);
+    if (localPos == null) return;
+
+    final Size canvasSize = box.size;
     _screenTouchPos = globalPos;
 
     // Перемещение угла листа А4
@@ -193,13 +189,13 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
 
-      // Движение отдельного узла
+      // Движение узла
       if (_activePointIndex != -1 && _activePointIndex < poly.points.length) {
         setState(() {
           poly.points[_activePointIndex] = localPos;
         });
       }
-      // Перемещение всей фигуры целиком
+      // Движение всей маски целиком
       else if (_isDraggingWholeObject && _lastLocalTouch != null) {
         final delta = localPos - _lastLocalTouch!;
         setState(() {
@@ -228,6 +224,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _autoDetectObjectAt(Offset touch, Size canvasSize) {
     setState(() => _isProcessing = true);
 
+    // Нормализованные координаты строго от 0.0 до 1.0 внутри изображения
     final normX = (touch.dx / canvasSize.width).clamp(0.0, 1.0);
     final normY = (touch.dy / canvasSize.height).clamp(0.0, 1.0);
 
@@ -352,7 +349,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
         actions: [
-          // Кнопка визуального контроля калибровки А4
           TextButton.icon(
             onPressed: () => setState(() => _showA4Calib = !_showA4Calib),
             icon: Icon(Icons.crop_free, size: 18, color: _showA4Calib ? const Color(0xFF2563EB) : const Color(0xFF64748B)),
@@ -385,7 +381,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final canvasSize = _calcCanvasSize(constraints, imgAspect);
+          final screenAspect = constraints.maxWidth / constraints.maxHeight;
+          final Size canvasSize = (screenAspect > imgAspect)
+              ? Size(constraints.maxHeight * imgAspect, constraints.maxHeight)
+              : Size(constraints.maxWidth, constraints.maxWidth / imgAspect);
+
           _recalculateA4Scale(canvasSize);
 
           return Column(
@@ -393,7 +393,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
               Expanded(
                 child: Stack(
                   children: [
-                    // Поддержка жестов масштабирования двумя пальцами (Pinch to zoom)
                     InteractiveViewer(
                       transformationController: _transformController,
                       minScale: 1.0,
@@ -402,6 +401,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       scaleEnabled: _activePointIndex == -1 && !_isDraggingWholeObject && _activeA4CornerIndex == -1,
                       child: Center(
                         child: SizedBox(
+                          key: _imageKey,
                           width: canvasSize.width,
                           height: canvasSize.height,
                           child: Stack(
@@ -409,7 +409,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                             children: [
                               Image.file(File(widget.imagePath), fit: BoxFit.fill),
 
-                              // Рамка калибровки А4 (отображается только по кнопке контроля)
                               if (_showA4Calib && _a4Corners.length == 4)
                                 CustomPaint(
                                   painter: _A4CalibPainter(
@@ -418,7 +417,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                   ),
                                 ),
 
-                              // Чистый контур (без узлов до тапа по линии)
                               CustomPaint(
                                 painter: _CleanPolygonPainter(
                                   polygons: _polygons,
@@ -432,23 +430,16 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       ),
                     ),
 
-                    // Сенсорный слой для точной обработки тапов и перетаскивания
                     Positioned.fill(
                       child: Listener(
                         behavior: HitTestBehavior.translucent,
-                        onPointerDown: (e) {
-                          // Один палец — редактирование/детекция. Два пальца — зум InteractiveViewer
-                          _handleTouchDown(e.position, context, constraints, imgAspect);
-                        },
-                        onPointerMove: (e) {
-                          _handleTouchMove(e.position, context, constraints, imgAspect);
-                        },
+                        onPointerDown: (e) => _handleTouchDown(e.position),
+                        onPointerMove: (e) => _handleTouchMove(e.position),
                         onPointerUp: (_) => _handleTouchEnd(),
                         onPointerCancel: (_) => _handleTouchEnd(),
                       ),
                     ),
 
-                    // Аппаратная экранная лупа строго над пальцем при смещении узла
                     if (_screenTouchPos != null && (_activePointIndex != -1 || _activeA4CornerIndex != -1))
                       Positioned(
                         left: (_screenTouchPos!.dx - 55).clamp(10.0, constraints.maxWidth - 120.0),
@@ -636,7 +627,7 @@ class _A4CalibPainter extends CustomPainter {
 
     for (int i = 0; i < corners.length; i++) {
       final isSelected = (i == activeCornerIndex);
-      final r = isSelected ? 9.5 : 7.0;
+      final r = isSelected ? 10.0 : 7.0;
       canvas.drawCircle(corners[i], r, cornerPaint);
       canvas.drawCircle(corners[i], r, borderPaint);
     }
@@ -683,7 +674,6 @@ class _CleanPolygonPainter extends CustomPainter {
       canvas.drawPath(path, fillPaint);
       canvas.drawPath(path, strokePaint);
 
-      // Рисуем узел только в тот момент, когда его создали тапом по отрезку и перемещают
       if (isSelected && activePointIndex != -1 && activePointIndex < poly.points.length) {
         final nodePaint = Paint()..color = const Color(0xFFF97316);
         final borderPaint = Paint()
