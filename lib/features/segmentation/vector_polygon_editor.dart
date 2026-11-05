@@ -1,55 +1,11 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import '../../core/a4_detector.dart';
 import '../../core/archive_service.dart';
 import '../../core/contour_detector.dart';
 import '../../core/polygon_math.dart';
-
-/// Модель данных пробы для расчёта прочности по ГОСТ 24941-81
-class SampleStrengthData {
-  String part1;     // Шифр часть 1 (например, БАМ)
-  String part2;     // Шифр часть 2 (например, 1)
-  String part3;     // Шифр часть 3 (например, 1)
-  String borehole;  // № скважины
-  String interval;  // Интервал
-  String condition; // n, w, h
-  String lithology; // Литотип
-  double areaCm2;   // J: Площадь скола, см²
-  double loadKn;    // K: Разрушающая нагрузка, кН
-
-  SampleStrengthData({
-    required this.part1,
-    required this.part2,
-    required this.part3,
-    this.borehole = '-',
-    this.interval = '-',
-    this.condition = 'n',
-    this.lithology = '-',
-    required this.areaCm2,
-    this.loadKn = 0.0,
-  });
-
-  // Столбец L: K = 0.5076 * (S ^ 0.2506)
-  double get coeffK => areaCm2 > 0 ? 0.5076 * math.pow(areaCm2, 0.2506) : 0.0;
-
-  // Столбец M: предел прочности на растяжение = (7.5 * P * K) / S
-  double get tensileStrengthMpa =>
-      areaCm2 > 0 ? (7.5 * loadKn * coeffK) / areaCm2 : 0.0;
-
-  // Столбец O: коэффициент пересчёта = ЕСЛИ(M < 1; 12; ЕСЛИ(M < 5; 16; 20))
-  double get conversionCoeff {
-    final m = tensileStrengthMpa;
-    if (m <= 0) return 0.0;
-    if (m < 1.0) return 12.0;
-    if (m < 5.0) return 16.0;
-    return 20.0;
-  }
-
-  // Столбец Q: предел прочности на сжатие Rc = M * O
-  double get compStrengthMpa => tensileStrengthMpa * conversionCoeff;
-}
+import '../strength/strength_calculator_sheet.dart';
 
 class _HistoryItem {
   final List<SamplePolygon> polygons;
@@ -120,18 +76,33 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
   }
 
+  Future<bool> _confirmExit() async {
+    if (_polygons.isEmpty) return true;
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text('Прекратить разметку?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: const Text('Несохранённые контуры и расчёты серии будут утеряны. Вы действительно хотите выйти?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Остаться')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Выйти'),
+          ),
+        ],
+      ),
+    );
+    return res ?? false;
+  }
+
   void _saveToHistory() {
     final snapshot = _polygons.map((poly) {
-      return SamplePolygon(
-        id: poly.id,
-        points: List<Offset>.from(poly.points),
-      );
+      return SamplePolygon(id: poly.id, points: List<Offset>.from(poly.points));
     }).toList();
 
-    _history.add(_HistoryItem(
-      polygons: snapshot,
-      activeIndex: _activePolygonIndex,
-    ));
+    _history.add(_HistoryItem(polygons: snapshot, activeIndex: _activePolygonIndex));
     if (_history.length > 25) _history.removeAt(0);
   }
 
@@ -148,10 +119,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   void _recalculateScale(Size canvasSize) {
     if (_a4Corners.length < 4) return;
-    final screenCorners = _a4Corners.map((p) {
-      return Offset(p.dx * canvasSize.width, p.dy * canvasSize.height);
-    }).toList();
-
+    final screenCorners = _a4Corners.map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height)).toList();
     final a4PxArea = PolygonMath.computeShoelaceArea(screenCorners);
     if (a4PxArea > 1000) {
       _pixelsPerCm2 = a4PxArea / A4Detector.a4PhysicalAreaCm2;
@@ -161,12 +129,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   Offset? _screenToCanvas(Offset screenPos) {
     final RenderBox? box = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return null;
-
     final Offset local = box.globalToLocal(screenPos);
-    return Offset(
-      local.dx.clamp(0.0, box.size.width),
-      local.dy.clamp(0.0, box.size.height),
-    );
+    return Offset(local.dx.clamp(0.0, box.size.width), local.dy.clamp(0.0, box.size.height));
   }
 
   void _onPointerDown(PointerDownEvent e) {
@@ -180,12 +144,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
     _isPanningOrZooming = false;
     _tapDownPosition = e.position;
-
     final localPos = _screenToCanvas(e.position);
     if (localPos == null) return;
 
     _lastLocalTouch = localPos;
-
     if (_isA4CalibMode) return;
 
     if (_isLassoMode) {
@@ -246,7 +208,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   void _onPointerMove(PointerMoveEvent e) {
     if (_isPanningOrZooming || _pointerCount > 1) return;
-
     final localPos = _screenToCanvas(e.position);
     if (localPos == null) return;
 
@@ -264,7 +225,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
     if (_activePolygonIndex != -1 && _activePolygonIndex < _polygons.length) {
       final poly = _polygons[_activePolygonIndex];
-
       if (_activePointIndex != -1 && _activePointIndex < poly.points.length) {
         setState(() {
           poly.points[_activePointIndex] = localPos;
@@ -291,10 +251,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     if (_isLassoMode && _lassoPoints.length > 5) {
       final int nextNum = _polygons.length + 1;
       setState(() {
-        _polygons.add(SamplePolygon(
-          id: 'БАМ 1 $nextNum',
-          points: List<Offset>.from(_lassoPoints),
-        ));
+        _polygons.add(SamplePolygon(id: 'БАМ 1 $nextNum', points: List<Offset>.from(_lassoPoints)));
         _activePolygonIndex = _polygons.length - 1;
         _lassoPoints.clear();
         _isLassoMode = false;
@@ -350,15 +307,9 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     setState(() {
       _isProcessing = false;
       final int nextNum = _polygons.length + 1;
+      final points = detectedNormPoints.map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height)).toList();
 
-      final points = detectedNormPoints.map((p) {
-        return Offset(p.dx * canvasSize.width, p.dy * canvasSize.height);
-      }).toList();
-
-      _polygons.add(SamplePolygon(
-        id: 'БАМ 1 $nextNum',
-        points: points,
-      ));
+      _polygons.add(SamplePolygon(id: 'БАМ 1 $nextNum', points: points));
       _activePolygonIndex = _polygons.length - 1;
       _activePointIndex = -1;
     });
@@ -366,13 +317,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   void _openStrengthCalculator() {
     final List<SampleStrengthData> items = [];
-
     for (int i = 0; i < _polygons.length; i++) {
       final p = _polygons[i];
       final area = PolygonMath.computeShoelaceArea(p.points) / _pixelsPerCm2;
       final raw = p.id.split(RegExp(r'\s+'));
-
       final existing = _strengthDataMap[i];
+
       items.add(SampleStrengthData(
         part1: existing?.part1 ?? (raw.isNotEmpty ? raw[0] : 'БАМ'),
         part2: existing?.part2 ?? (raw.length > 1 ? raw[1] : '1'),
@@ -388,55 +338,14 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       MaterialPageRoute(
         builder: (_) => StrengthCalculatorSheet(
           initialSamples: items,
-          onSaved: () {
-            for (int i = 0; i < items.length; i++) {
-              _strengthDataMap[i] = items[i];
-              _polygons[i].id = '${items[i].part1} ${items[i].part2} ${items[i].part3}';
+          onSaved: (updated) {
+            for (int i = 0; i < updated.length; i++) {
+              _strengthDataMap[i] = updated[i];
+              _polygons[i].id = '${updated[i].part1} ${updated[i].part2} ${updated[i].part3}';
             }
             setState(() {});
           },
         ),
-      ),
-    );
-  }
-
-  void _editSampleName(int index) {
-    final controller = TextEditingController(text: _polygons[index].id);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        title: const Text('Шифр образца (например: БАМ 1 1)',
-            style: TextStyle(color: Color(0xFF0F172A), fontSize: 16, fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: const TextStyle(color: Color(0xFF0F172A)),
-          decoration: const InputDecoration(
-            hintText: 'БАМ 1 1',
-            hintStyle: TextStyle(color: Color(0xFF94A3B8)),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFF97316))),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFEA580C), width: 2)),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Отмена', style: TextStyle(color: Color(0xFF64748B))),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF97316), foregroundColor: Colors.white),
-            onPressed: () {
-              if (controller.text.trim().isNotEmpty) {
-                setState(() {
-                  _polygons[index].id = controller.text.trim();
-                });
-              }
-              Navigator.pop(ctx);
-            },
-            child: const Text('Сохранить'),
-          ),
-        ],
       ),
     );
   }
@@ -447,11 +356,22 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     double totalArea = 0.0;
     final List<SampleItem> samples = [];
 
-    for (final p in _polygons) {
+    for (int i = 0; i < _polygons.length; i++) {
+      final p = _polygons[i];
       final px = PolygonMath.computeShoelaceArea(p.points);
       final cm2 = px / _pixelsPerCm2;
       totalArea += cm2;
-      samples.add(SampleItem(name: p.id, areaPx: px, areaCm2: cm2));
+
+      final str = _strengthDataMap[i];
+      samples.add(SampleItem(
+        name: p.id,
+        areaPx: px,
+        areaCm2: cm2,
+        loadKn: str?.loadKn ?? 0.0,
+        condition: str?.condition ?? 'n',
+        tensileMpa: str?.tensileStrengthMpa ?? 0.0,
+        compMpa: str?.compStrengthMpa ?? 0.0,
+      ));
     }
 
     final now = DateTime.now();
@@ -470,10 +390,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Color(0xFF2563EB),
-          content: Text('Серия испытаний успешно сохранена в журнал!'),
-        ),
+        const SnackBar(backgroundColor: Color(0xFF2563EB), content: Text('Серия испытаний успешно сохранена в журнал!')),
       );
       Navigator.pop(context);
     }
@@ -491,401 +408,331 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       totalAreaCm2 += (pxArea / _pixelsPerCm2);
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: const Text('Планиметрия керна',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.undo, color: Color(0xFF475569)),
-            tooltip: 'Отменить действие',
-            onPressed: _history.isNotEmpty ? _undo : null,
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        final shouldExit = await _confirmExit();
+        if (shouldExit && context.mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        appBar: AppBar(
+          title: const Text('Разметка керна', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+          backgroundColor: Colors.white,
+          elevation: 0.5,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Color(0xFF0F172A)),
+            onPressed: () async {
+              if (await _confirmExit() && context.mounted) Navigator.pop(context);
+            },
           ),
-          IconButton(
-            icon: const Icon(Icons.calculate_outlined, color: Color(0xFF2563EB)),
-            tooltip: 'Расчёт прочности (ГОСТ 24941-81)',
-            onPressed: _polygons.isNotEmpty ? _openStrengthCalculator : null,
-          ),
-          IconButton(
-            icon: Icon(Icons.gesture, color: _isLassoMode ? const Color(0xFFF97316) : const Color(0xFF64748B)),
-            tooltip: 'Режим лассо',
-            onPressed: () => setState(() {
-              _isLassoMode = !_isLassoMode;
-              _isA4CalibMode = false;
-            }),
-          ),
-          TextButton.icon(
-            onPressed: () => setState(() {
-              _isA4CalibMode = !_isA4CalibMode;
-              _isLassoMode = false;
-              _activePointIndex = -1;
-              _isDraggingWholeObject = false;
-            }),
-            icon: Icon(Icons.crop_free, size: 18, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF64748B)),
-            label: Text(
-              _isA4CalibMode ? 'А4 (Вкл)' : 'Калибровка А4',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF64748B),
-              ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.undo, color: Color(0xFF475569)),
+              tooltip: 'Отменить действие',
+              onPressed: _history.isNotEmpty ? _undo : null,
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.bookmark_add, color: Color(0xFFF97316)),
-            tooltip: 'Сохранить в журнал',
-            onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
-            tooltip: 'Удалить активный объект',
-            onPressed: _activePolygonIndex != -1
-                ? () {
-                    _saveToHistory();
-                    setState(() {
-                      _polygons.removeAt(_activePolygonIndex);
-                      _activePolygonIndex = _polygons.isNotEmpty ? _polygons.length - 1 : -1;
-                      _activePointIndex = -1;
-                    });
-                  }
-                : null,
-          ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final screenAspect = constraints.maxWidth / constraints.maxHeight;
-          final Size canvasSize = (screenAspect > imgAspect)
-              ? Size(constraints.maxHeight * imgAspect, constraints.maxHeight)
-              : Size(constraints.maxWidth, constraints.maxWidth / imgAspect);
+            if (_activePolygonIndex != -1)
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
+                tooltip: 'Удалить активный образец',
+                onPressed: () {
+                  _saveToHistory();
+                  setState(() {
+                    _polygons.removeAt(_activePolygonIndex);
+                    _strengthDataMap.remove(_activePolygonIndex);
+                    _activePolygonIndex = _polygons.isNotEmpty ? _polygons.length - 1 : -1;
+                    _activePointIndex = -1;
+                  });
+                },
+              ),
+          ],
+        ),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final screenAspect = constraints.maxWidth / constraints.maxHeight;
+            final Size canvasSize = (screenAspect > imgAspect)
+                ? Size(constraints.maxHeight * imgAspect, constraints.maxHeight)
+                : Size(constraints.maxWidth, constraints.maxWidth / imgAspect);
 
-          _recalculateScale(canvasSize);
+            _recalculateScale(canvasSize);
+            final bool isManipulating = _activePointIndex != -1 || _isDraggingWholeObject || _isLassoMode;
 
-          final bool isManipulating = _activePointIndex != -1 || _isDraggingWholeObject || _isLassoMode;
+            return Column(
+              children: [
+                Expanded(
+                  child: Stack(
+                    children: [
+                      InteractiveViewer(
+                        transformationController: _transformController,
+                        minScale: 1.0,
+                        maxScale: 4.5,
+                        panEnabled: !_isA4CalibMode && !isManipulating,
+                        scaleEnabled: !_isA4CalibMode && !isManipulating,
+                        child: Center(
+                          child: SizedBox(
+                            key: _canvasKey,
+                            width: canvasSize.width,
+                            height: canvasSize.height,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              clipBehavior: Clip.none,
+                              children: [
+                                Image.file(File(widget.imagePath), fit: BoxFit.fill),
 
-          return Column(
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    InteractiveViewer(
-                      transformationController: _transformController,
-                      minScale: 1.0,
-                      maxScale: 4.5,
-                      panEnabled: !_isA4CalibMode && !isManipulating,
-                      scaleEnabled: !_isA4CalibMode && !isManipulating,
-                      child: Center(
-                        child: SizedBox(
-                          key: _canvasKey,
-                          width: canvasSize.width,
-                          height: canvasSize.height,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            clipBehavior: Clip.none,
-                            children: [
-                              Image.file(File(widget.imagePath), fit: BoxFit.fill),
+                                if (_isA4CalibMode && _a4Corners.length == 4)
+                                  CustomPaint(
+                                    painter: _A4FrameOnlyPainter(
+                                      corners: _a4Corners.map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height)).toList(),
+                                    ),
+                                  ),
 
-                              if (_isA4CalibMode && _a4Corners.length == 4)
                                 CustomPaint(
-                                  painter: _A4FrameOnlyPainter(
-                                    corners: _a4Corners.map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height)).toList(),
+                                  painter: _CleanPolygonPainter(
+                                    polygons: _polygons,
+                                    activeIndex: _activePolygonIndex,
+                                    activePointIndex: _activePointIndex,
+                                    lassoPoints: _lassoPoints,
                                   ),
                                 ),
 
-                              CustomPaint(
-                                painter: _CleanPolygonPainter(
-                                  polygons: _polygons,
-                                  activeIndex: _activePolygonIndex,
-                                  activePointIndex: _activePointIndex,
-                                  lassoPoints: _lassoPoints,
-                                ),
-                              ),
-
-                              // Интерактивные маркеры углов листа А4
-                              if (_isA4CalibMode && _a4Corners.length == 4)
-                                for (int i = 0; i < _a4Corners.length; i++)
-                                  Positioned(
-                                    left: _a4Corners[i].dx * canvasSize.width - 32,
-                                    top: _a4Corners[i].dy * canvasSize.height - 32,
-                                    child: GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onPanUpdate: (details) {
-                                        setState(() {
-                                          final currentX = _a4Corners[i].dx * canvasSize.width + details.delta.dx;
-                                          final currentY = _a4Corners[i].dy * canvasSize.height + details.delta.dy;
-                                          _a4Corners[i] = Offset(
-                                            (currentX / canvasSize.width).clamp(0.0, 1.0),
-                                            (currentY / canvasSize.height).clamp(0.0, 1.0),
-                                          );
-                                          _targetNodeLocal = Offset(currentX, currentY);
-                                        });
-                                        _recalculateScale(canvasSize);
-                                      },
-                                      onPanEnd: (_) => setState(() => _targetNodeLocal = null),
-                                      child: Container(
-                                        width: 64,
-                                        height: 64,
-                                        alignment: Alignment.center,
-                                        color: Colors.transparent,
+                                if (_isA4CalibMode && _a4Corners.length == 4)
+                                  for (int i = 0; i < _a4Corners.length; i++)
+                                    Positioned(
+                                      left: _a4Corners[i].dx * canvasSize.width - 32,
+                                      top: _a4Corners[i].dy * canvasSize.height - 32,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onPanUpdate: (details) {
+                                          setState(() {
+                                            final currentX = _a4Corners[i].dx * canvasSize.width + details.delta.dx;
+                                            final currentY = _a4Corners[i].dy * canvasSize.height + details.delta.dy;
+                                            _a4Corners[i] = Offset(
+                                              (currentX / canvasSize.width).clamp(0.0, 1.0),
+                                              (currentY / canvasSize.height).clamp(0.0, 1.0),
+                                            );
+                                            _targetNodeLocal = Offset(currentX, currentY);
+                                          });
+                                          _recalculateScale(canvasSize);
+                                        },
+                                        onPanEnd: (_) => setState(() => _targetNodeLocal = null),
                                         child: Container(
-                                          width: 24,
-                                          height: 24,
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF2563EB),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(color: Colors.white, width: 3),
-                                            boxShadow: const [
-                                              BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
-                                            ],
+                                          width: 64,
+                                          height: 64,
+                                          alignment: Alignment.center,
+                                          color: Colors.transparent,
+                                          child: Container(
+                                            width: 24,
+                                            height: 24,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF2563EB),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: Colors.white, width: 3),
+                                              boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2))],
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    if (!_isA4CalibMode)
-                      Positioned.fill(
-                        child: Listener(
-                          behavior: HitTestBehavior.translucent,
-                          onPointerDown: _onPointerDown,
-                          onPointerMove: _onPointerMove,
-                          onPointerUp: _onPointerUp,
-                          onPointerCancel: (_) {
-                            _pointerCount = 0;
-                            setState(() {
-                              _activePointIndex = -1;
-                              _isDraggingWholeObject = false;
-                              _targetNodeLocal = null;
-                            });
-                          },
-                        ),
-                      ),
-
-                    // Чёткая лупа-прицел (HUD) с абсолютным совпадением 1:1
-                    if (_targetNodeLocal != null && _decodedImage != null)
-                      Positioned(
-                        top: 16,
-                        right: 16,
-                        child: Container(
-                          width: 140,
-                          height: 140,
-                          decoration: BoxDecoration(
-                            color: Colors.black,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFFF97316), width: 3),
-                            boxShadow: const [
-                              BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 4)),
-                            ],
-                          ),
-                          child: ClipOval(
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                _AccurateHUDMagnifier(
-                                  imageFile: File(widget.imagePath),
-                                  normX: _targetNodeLocal!.dx / canvasSize.width,
-                                  normY: _targetNodeLocal!.dy / canvasSize.height,
-                                ),
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: const BoxDecoration(color: Color(0xFFF97316), shape: BoxShape.circle),
-                                ),
-                                Container(
-                                  width: 26,
-                                  height: 26,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: const Color(0xFFF97316), width: 1.5),
-                                  ),
-                                ),
                               ],
                             ),
                           ),
                         ),
                       ),
 
-                    if (_isProcessing)
-                      Container(
-                        color: Colors.black26,
-                        child: const Center(child: CircularProgressIndicator(color: Color(0xFFF97316))),
-                      ),
-                  ],
-                ),
-              ),
+                      if (!_isA4CalibMode)
+                        Positioned.fill(
+                          child: Listener(
+                            behavior: HitTestBehavior.translucent,
+                            onPointerDown: _onPointerDown,
+                            onPointerMove: _onPointerMove,
+                            onPointerUp: _onPointerUp,
+                            onPointerCancel: (_) {
+                              _pointerCount = 0;
+                              setState(() {
+                                _activePointIndex = -1;
+                                _isDraggingWholeObject = false;
+                                _targetNodeLocal = null;
+                              });
+                            },
+                          ),
+                        ),
 
-              // Нижняя панель
-              Container(
-                height: 220,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                  boxShadow: [BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, -3))],
-                ),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Text('ОБЩАЯ ПЛОЩАДЬ СЕРИИ',
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            color: Color(0xFF64748B),
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 0.5)),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFEFF6FF),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text('${_pixelsPerCm2.toStringAsFixed(0)} px/см²',
-                                          style: const TextStyle(
-                                              fontSize: 9, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
-                                    ),
-                                  ],
-                                ),
-                                Text('${totalAreaCm2.toStringAsFixed(2)} см²',
-                                    style: const TextStyle(
-                                        fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
-                              ],
+                      // Лупа 1:1 в правом верхнем углу
+                      if (_targetNodeLocal != null && _decodedImage != null)
+                        Positioned(
+                          top: 14,
+                          right: 14,
+                          child: Container(
+                            width: 140,
+                            height: 140,
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: const Color(0xFFF97316), width: 3),
+                              boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 4))],
                             ),
-                          ),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFF97316),
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            ),
-                            icon: const Icon(Icons.check, size: 16),
-                            label: const Text('В журнал', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(color: Color(0xFFE2E8F0), height: 1),
-                    Expanded(
-                      child: _isA4CalibMode
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
+                            child: ClipOval(
+                              child: Stack(
+                                alignment: Alignment.center,
                                 children: [
-                                  const Text('Режим калибровки А4',
-                                      style: TextStyle(
-                                          fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                                  const SizedBox(height: 4),
-                                  const Text('Перетяните 4 синих маркера строго по углам листа бумаги на столе.',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                                  const SizedBox(height: 8),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF2563EB),
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                    ),
-                                    onPressed: () => setState(() => _isA4CalibMode = false),
-                                    child: const Text('Готово к разметке', style: TextStyle(fontSize: 12)),
+                                  _AccurateHUDMagnifier(
+                                    imageFile: File(widget.imagePath),
+                                    normX: _targetNodeLocal!.dx / canvasSize.width,
+                                    normY: _targetNodeLocal!.dy / canvasSize.height,
                                   ),
+                                  Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFFF97316), shape: BoxShape.circle)),
+                                  Container(width: 26, height: 26, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFFF97316), width: 1.5))),
                                 ],
                               ),
-                            )
-                          : _isLassoMode
-                              ? const Center(
-                                  child: Text('Проведите пальцем вокруг объекта для ручной обводки (Лассо)',
-                                      style: TextStyle(
-                                          color: Color(0xFFF97316), fontWeight: FontWeight.w600, fontSize: 13)),
-                                )
-                              : _polygons.isEmpty
-                                  ? const Center(
-                                      child: Text('Коснитесь объекта для авто-сегментации контура',
-                                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
-                                    )
-                                  : ListView.builder(
-                                      itemCount: _polygons.length,
-                                      itemBuilder: (context, idx) {
-                                        final poly = _polygons[idx];
-                                        final pxArea = PolygonMath.computeShoelaceArea(poly.points);
-                                        final cm2Area = pxArea / _pixelsPerCm2;
-                                        final isSelected = (idx == _activePolygonIndex);
+                            ),
+                          ),
+                        ),
 
-                                        return Container(
-                                          decoration: BoxDecoration(
-                                            color: isSelected ? const Color(0xFFFFF7ED) : Colors.transparent,
-                                            border: Border(
-                                              left: BorderSide(
-                                                color: isSelected ? const Color(0xFFF97316) : Colors.transparent,
-                                                width: 4,
-                                              ),
-                                            ),
-                                          ),
-                                          child: ListTile(
-                                            dense: true,
-                                            leading: CircleAvatar(
-                                              radius: 12,
-                                              backgroundColor:
-                                                  isSelected ? const Color(0xFFF97316) : const Color(0xFFE2E8F0),
-                                              child: Text('${idx + 1}',
-                                                  style: TextStyle(
-                                                      fontSize: 11,
-                                                      color: isSelected ? Colors.white : const Color(0xFF475569),
-                                                      fontWeight: FontWeight.bold)),
-                                            ),
-                                            title: Row(
-                                              children: [
-                                                Text(poly.id,
-                                                    style: TextStyle(
-                                                        color: const Color(0xFF0F172A),
-                                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500)),
-                                                const SizedBox(width: 8),
-                                                GestureDetector(
-                                                  onTap: () => _editSampleName(idx),
-                                                  child: const Icon(Icons.edit_outlined,
-                                                      size: 15, color: Color(0xFF94A3B8)),
-                                                ),
-                                              ],
-                                            ),
-                                            subtitle: isSelected
-                                                ? const Text('Тап по контуру — узел. Зажав центр — сдвинуть.',
-                                                    style: TextStyle(fontSize: 10, color: Color(0xFF64748B)))
-                                                : null,
-                                            trailing: Text('${cm2Area.toStringAsFixed(2)} см²',
-                                                style: const TextStyle(
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Color(0xFF2563EB))),
-                                            onTap: () => setState(() => _activePolygonIndex = idx),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                    ),
-                  ],
+                      // Разгруженный тулбар инструментов (снизу экрана над панелью)
+                      Positioned(
+                        bottom: 12,
+                        left: 16,
+                        right: 16,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.95),
+                              borderRadius: BorderRadius.circular(30),
+                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 3))],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () => setState(() {
+                                    _isA4CalibMode = !_isA4CalibMode;
+                                    _isLassoMode = false;
+                                    _activePointIndex = -1;
+                                  }),
+                                  icon: Icon(Icons.crop_free, size: 16, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF475569)),
+                                  label: Text(_isA4CalibMode ? 'Готово' : 'Калибровка А4',
+                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF475569))),
+                                ),
+                                Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
+                                IconButton(
+                                  icon: Icon(Icons.gesture, size: 18, color: _isLassoMode ? const Color(0xFFF97316) : const Color(0xFF475569)),
+                                  tooltip: 'Лассо',
+                                  onPressed: () => setState(() {
+                                    _isLassoMode = !_isLassoMode;
+                                    _isA4CalibMode = false;
+                                  }),
+                                ),
+                                Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
+                                TextButton.icon(
+                                  onPressed: _polygons.isNotEmpty ? _openStrengthCalculator : null,
+                                  icon: const Icon(Icons.calculate_outlined, size: 16, color: Color(0xFF2563EB)),
+                                  label: const Text('ГОСТ 24941', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      if (_isProcessing)
+                        Container(color: Colors.black26, child: const Center(child: CircularProgressIndicator(color: Color(0xFFF97316)))),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+
+                // Нижняя панель списка
+                Container(
+                  height: 200,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    boxShadow: [BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, -3))],
+                  ),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text('ПЛОЩАДЬ СЕРИИ', style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                        decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(4)),
+                                        child: Text('${_pixelsPerCm2.toStringAsFixed(0)} px/см²', style: const TextStyle(fontSize: 9, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
+                                      ),
+                                    ],
+                                  ),
+                                  Text('${totalAreaCm2.toStringAsFixed(2)} см²', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+                                ],
+                              ),
+                            ),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFF97316),
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.check, size: 16),
+                              label: const Text('В журнал', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(color: Color(0xFFE2E8F0), height: 1),
+                      Expanded(
+                        child: _polygons.isEmpty
+                            ? const Center(child: Text('Коснитесь объекта для авто-сегментации контура', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)))
+                            : ListView.builder(
+                                itemCount: _polygons.length,
+                                itemBuilder: (context, idx) {
+                                  final poly = _polygons[idx];
+                                  final pxArea = PolygonMath.computeShoelaceArea(poly.points);
+                                  final cm2Area = pxArea / _pixelsPerCm2;
+                                  final isSelected = (idx == _activePolygonIndex);
+
+                                  return Container(
+                                    decoration: BoxDecoration(
+                                      color: isSelected ? const Color(0xFFFFF7ED) : Colors.transparent,
+                                      border: Border(left: BorderSide(color: isSelected ? const Color(0xFFF97316) : Colors.transparent, width: 4)),
+                                    ),
+                                    child: ListTile(
+                                      dense: true,
+                                      leading: CircleAvatar(
+                                        radius: 11,
+                                        backgroundColor: isSelected ? const Color(0xFFF97316) : const Color(0xFFE2E8F0),
+                                        child: Text('${idx + 1}', style: TextStyle(fontSize: 10, color: isSelected ? Colors.white : const Color(0xFF475569), fontWeight: FontWeight.bold)),
+                                      ),
+                                      title: Text(poly.id, style: TextStyle(color: const Color(0xFF0F172A), fontWeight: isSelected ? FontWeight.bold : FontWeight.w500)),
+                                      subtitle: isSelected ? const Text('Тап по контуру — узел. Зажав центр — сдвинуть.', style: TextStyle(fontSize: 10, color: Color(0xFF64748B))) : null,
+                                      trailing: Text('${cm2Area.toStringAsFixed(2)} см²', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                      onTap: () => setState(() => _activePolygonIndex = idx),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -898,7 +745,6 @@ class _A4FrameOnlyPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (corners.length < 4) return;
-
     final framePaint = Paint()
       ..color = const Color(0xFF2563EB).withOpacity(0.85)
       ..strokeWidth = 2.5
@@ -934,11 +780,7 @@ class _CleanPolygonPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (lassoPoints.length > 1) {
-      final lassoPaint = Paint()
-        ..color = const Color(0xFFF97316)
-        ..strokeWidth = 2.5
-        ..style = PaintingStyle.stroke;
-
+      final lassoPaint = Paint()..color = const Color(0xFFF97316)..strokeWidth = 2.5..style = PaintingStyle.stroke;
       final lPath = Path()..moveTo(lassoPoints.first.dx, lassoPoints.first.dy);
       for (int i = 1; i < lassoPoints.length; i++) {
         lPath.lineTo(lassoPoints[i].dx, lassoPoints[i].dy);
@@ -949,17 +791,10 @@ class _CleanPolygonPainter extends CustomPainter {
     for (int p = 0; p < polygons.length; p++) {
       final poly = polygons[p];
       if (poly.points.length < 3) continue;
-
       final bool isSelected = (p == activeIndex);
 
-      final fillPaint = Paint()
-        ..color = (isSelected ? const Color(0xFFF97316) : const Color(0xFF94A3B8)).withOpacity(0.32)
-        ..style = PaintingStyle.fill;
-
-      final strokePaint = Paint()
-        ..color = isSelected ? const Color(0xFFF97316) : const Color(0xFF64748B)
-        ..strokeWidth = isSelected ? 2.5 : 1.5
-        ..style = PaintingStyle.stroke;
+      final fillPaint = Paint()..color = (isSelected ? const Color(0xFFF97316) : const Color(0xFF94A3B8)).withOpacity(0.32)..style = PaintingStyle.fill;
+      final strokePaint = Paint()..color = isSelected ? const Color(0xFFF97316) : const Color(0xFF64748B)..strokeWidth = isSelected ? 2.5 : 1.5..style = PaintingStyle.stroke;
 
       final path = Path()..moveTo(poly.points.first.dx, poly.points.first.dy);
       for (int i = 1; i < poly.points.length; i++) {
@@ -972,11 +807,7 @@ class _CleanPolygonPainter extends CustomPainter {
 
       if (isSelected && activePointIndex != -1 && activePointIndex < poly.points.length) {
         final nodePaint = Paint()..color = const Color(0xFFF97316);
-        final borderPaint = Paint()
-          ..color = Colors.white
-          ..strokeWidth = 2.0
-          ..style = PaintingStyle.stroke;
-
+        final borderPaint = Paint()..color = Colors.white..strokeWidth = 2.0..style = PaintingStyle.stroke;
         canvas.drawCircle(poly.points[activePointIndex], 7.5, nodePaint);
         canvas.drawCircle(poly.points[activePointIndex], 7.5, borderPaint);
       }
@@ -992,11 +823,7 @@ class _AccurateHUDMagnifier extends StatelessWidget {
   final double normX;
   final double normY;
 
-  const _AccurateHUDMagnifier({
-    required this.imageFile,
-    required this.normX,
-    required this.normY,
-  });
+  const _AccurateHUDMagnifier({required this.imageFile, required this.normX, required this.normY});
 
   @override
   Widget build(BuildContext context) {
@@ -1004,7 +831,6 @@ class _AccurateHUDMagnifier extends StatelessWidget {
       builder: (context, constraints) {
         const double zoom = 3.5;
         final double mid = constraints.maxWidth / 2;
-
         return ClipRect(
           child: Transform(
             transform: Matrix4.identity()
@@ -1014,245 +840,11 @@ class _AccurateHUDMagnifier extends StatelessWidget {
             child: SizedBox(
               width: constraints.maxWidth,
               height: constraints.maxHeight,
-              child: Image.file(
-                imageFile,
-                fit: BoxFit.fill,
-                filterQuality: FilterQuality.none,
-              ),
+              child: Image.file(imageFile, fit: BoxFit.fill, filterQuality: FilterQuality.none),
             ),
           ),
         );
       },
-    );
-  }
-}
-
-/// Экран таблицы расчёта прочности по ГОСТ 24941-81
-class StrengthCalculatorSheet extends StatefulWidget {
-  final List<SampleStrengthData> initialSamples;
-  final VoidCallback onSaved;
-
-  const StrengthCalculatorSheet({
-    super.key,
-    required this.initialSamples,
-    required this.onSaved,
-  });
-
-  @override
-  State<StrengthCalculatorSheet> createState() => _StrengthCalculatorSheetState();
-}
-
-class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
-  late List<SampleStrengthData> _samples;
-
-  @override
-  void initState() {
-    super.initState();
-    _samples = widget.initialSamples;
-  }
-
-  double get _avgTensile {
-    final valid = _samples.where((s) => s.tensileStrengthMpa > 0).toList();
-    if (valid.isEmpty) return 0.0;
-    return valid.map((s) => s.tensileStrengthMpa).reduce((a, b) => a + b) / valid.length;
-  }
-
-  double get _avgComp {
-    final valid = _samples.where((s) => s.compStrengthMpa > 0).toList();
-    if (valid.isEmpty) return 0.0;
-    return valid.map((s) => s.compStrengthMpa).reduce((a, b) => a + b) / valid.length;
-  }
-
-  void _editSample(int index) {
-    final s = _samples[index];
-    final cipherCtrl = TextEditingController(text: '${s.part1} ${s.part2} ${s.part3}'.trim());
-    final loadCtrl = TextEditingController(text: s.loadKn > 0 ? s.loadKn.toString() : '');
-    String condition = s.condition;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: Colors.white,
-          title: Text('Параметры образца #${index + 1}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Шифр пробы (через пробелы):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                TextField(
-                  controller: cipherCtrl,
-                  decoration: const InputDecoration(
-                    hintText: 'БАМ 1 1',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text('Площадь скола S: ${s.areaCm2.toStringAsFixed(2)} см²',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                const SizedBox(height: 12),
-                const Text('Разрушающая нагрузка P (кН):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                TextField(
-                  controller: loadCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    hintText: 'Например: 12.4',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text('Состояние образца:', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                DropdownButton<String>(
-                  value: condition,
-                  isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(value: 'n', child: Text('n — естественная влажность')),
-                    DropdownMenuItem(value: 'w', child: Text('w — водонасыщенное')),
-                    DropdownMenuItem(value: 'h', child: Text('h — воздушно-сухое')),
-                  ],
-                  onChanged: (val) {
-                    if (val != null) setDialogState(() => condition = val);
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFF97316), foregroundColor: Colors.white),
-              onPressed: () {
-                final raw = cipherCtrl.text.trim().split(RegExp(r'\s+'));
-                setState(() {
-                  s.part1 = raw.isNotEmpty ? raw[0] : '-';
-                  s.part2 = raw.length > 1 ? raw[1] : '-';
-                  s.part3 = raw.length > 2 ? raw[2] : '-';
-                  s.loadKn = double.tryParse(loadCtrl.text.replaceAll(',', '.')) ?? 0.0;
-                  s.condition = condition;
-                });
-                Navigator.pop(ctx);
-              },
-              child: const Text('Рассчитать'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: const Text('ГОСТ 24941-81 (Инденторы)',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
-        actions: [
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white),
-            icon: const Icon(Icons.check, size: 16),
-            label: const Text('Принять'),
-            onPressed: () {
-              widget.onSaved();
-              Navigator.pop(context);
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: Colors.white,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('СР. РАСТЯЖЕНИЕ (МПа)',
-                          style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
-                      Text('${_avgTensile.toStringAsFixed(2)} МПа',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
-                    ],
-                  ),
-                ),
-                Container(width: 1, height: 35, color: const Color(0xFFE2E8F0)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('СР. СЖАТИЕ Rc (МПа)',
-                          style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
-                      Text('${_avgComp.toStringAsFixed(2)} МПа',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: Color(0xFFE2E8F0)),
-          Expanded(
-            child: ListView.separated(
-              itemCount: _samples.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFE2E8F0)),
-              itemBuilder: (ctx, idx) {
-                final s = _samples[idx];
-                return ListTile(
-                  tileColor: Colors.white,
-                  dense: true,
-                  onTap: () => _editSample(idx),
-                  leading: CircleAvatar(
-                    radius: 12,
-                    backgroundColor: const Color(0xFFEFF6FF),
-                    child: Text('${idx + 1}',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                  ),
-                  title: Row(
-                    children: [
-                      Text('${s.part1} | ${s.part2} | ${s.part3}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        decoration:
-                            BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(4)),
-                        child: Text(s.condition, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                  subtitle: Text(
-                    'S = ${s.areaCm2.toStringAsFixed(2)} см² | P = ${s.loadKn} кН | K = ${s.coeffK.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                  ),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('Rc: ${s.compStrengthMpa.toStringAsFixed(1)} МПа',
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
-                      Text('σр: ${s.tensileStrengthMpa.toStringAsFixed(2)} (x${s.conversionCoeff.toInt()})',
-                          style: const TextStyle(fontSize: 10, color: Color(0xFF64748B))),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
