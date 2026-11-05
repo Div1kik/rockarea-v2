@@ -44,7 +44,7 @@ class StrengthCalculatorSheet extends StatefulWidget {
 
   const StrengthCalculatorSheet({
     super.key,
-    this.title = 'ГОСТ 24941-81 (Инденторы)',
+    this.title = 'Расчёт нагрузки',
     required this.initialSamples,
     required this.onSaved,
   });
@@ -85,18 +85,11 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Экспорт протокола ГОСТ 24941-81', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
-            const SizedBox(height: 6),
-            const Text('Таблица сформирована строго 1-в-1 по лабораторному бланку Excel', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-            const SizedBox(height: 16),
+            const Text('Экспорт: Расчёт нагрузки', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
+            const SizedBox(height: 14),
             ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.download, color: Color(0xFF2563EB)),
-              ),
-              title: const Text('Сохранить в память (Загрузки)', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Прямая запись CSV-файла на устройство', style: TextStyle(fontSize: 11)),
+              leading: const Icon(Icons.download, color: Color(0xFF2563EB)),
+              title: const Text('Сохранить в Загрузки', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(ctx);
                 ExportService.exportGostProtocol(
@@ -110,13 +103,8 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               },
             ),
             ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.share_outlined, color: Color(0xFFF97316)),
-              ),
-              title: const Text('Отправить / Поделиться', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Переслать в мессенджер, почту или диск', style: TextStyle(fontSize: 11)),
+              leading: const Icon(Icons.share_outlined, color: Color(0xFFF97316)),
+              title: const Text('Отправить', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(ctx);
                 ExportService.exportGostProtocol(
@@ -171,13 +159,13 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                   autofocus: true,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
-                    hintText: 'Например: 14.5',
+                    hintText: '14.5',
                     border: OutlineInputBorder(),
                     contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('Состояние образца:', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                const Text('Состояние:', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                 DropdownButton<String>(
                   value: condition,
                   isExpanded: true,
@@ -196,7 +184,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF97316), foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white),
               onPressed: () {
                 final raw = cipherCtrl.text.trim().split(RegExp(r'\s+'));
                 setState(() {
@@ -208,7 +196,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                 });
                 Navigator.pop(ctx);
               },
-              child: const Text('Рассчитать'),
+              child: const Text('Применить'),
             ),
           ],
         ),
@@ -228,7 +216,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
         actions: [
           IconButton(
             icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB)),
-            tooltip: 'Экспорт / Сохранить протокол',
+            tooltip: 'Экспорт таблицы',
             onPressed: _showExportOptions,
           ),
           ElevatedButton(
@@ -241,7 +229,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               widget.onSaved(_samples);
               Navigator.pop(context);
             },
-            child: const Text('Принять'),
+            child: const Text('Готово'),
           ),
           const SizedBox(width: 8),
         ],
@@ -312,7 +300,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text('Rc: ${s.compStrengthMpa.toStringAsFixed(1)} МПа', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
-                      Text('Нажмите для ввода P', style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8))),
+                      const Text('Ввести P', style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
                     ],
                   ),
                 );
