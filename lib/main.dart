@@ -20,9 +20,9 @@ class RockAreaApp extends StatelessWidget {
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFFF8FAFC),
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2563EB),
-          primary: const Color(0xFF2563EB),
-          secondary: const Color(0xFFF97316),
+          seedColor: const Color(0xFFF97316),
+          primary: const Color(0xFFF97316),
+          secondary: const Color(0xFF2563EB),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.folder_outlined, color: Color(0xFF2563EB)),
+            icon: const Icon(Icons.folder_outlined, color: Color(0xFFF97316)),
             tooltip: 'Журнал испытаний (Архив)',
             onPressed: () {
               Navigator.push(
@@ -106,14 +106,16 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const RockAreaLogo(size: 150),
-              const SizedBox(height: 48),
+              // Прежняя оранжевая эмблема с кристаллическими гранями
+              const OrangeCrystalLogo(size: 140),
+              const SizedBox(height: 44),
+
               SizedBox(
                 width: double.infinity,
                 height: 54,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
+                    backgroundColor: const Color(0xFFF97316),
                     foregroundColor: Colors.white,
                     elevation: 2,
                     shape: RoundedRectangleBorder(
@@ -129,6 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 14),
+
               SizedBox(
                 width: double.infinity,
                 height: 52,
@@ -149,6 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+
               TextButton.icon(
                 onPressed: () {
                   Navigator.push(
@@ -174,9 +178,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class RockAreaLogo extends StatelessWidget {
+class OrangeCrystalLogo extends StatelessWidget {
   final double size;
-  const RockAreaLogo({super.key, this.size = 140});
+  const OrangeCrystalLogo({super.key, this.size = 130});
 
   @override
   Widget build(BuildContext context) {
@@ -185,7 +189,7 @@ class RockAreaLogo extends StatelessWidget {
       children: [
         CustomPaint(
           size: Size(size, size),
-          painter: _RockAreaLogoPainter(),
+          painter: _OrangeCrystalPainter(),
         ),
         const SizedBox(height: 12),
         const Text(
@@ -201,7 +205,7 @@ class RockAreaLogo extends StatelessWidget {
         const Text(
           'GEOMECHANICS & PLANIMETRY',
           style: TextStyle(
-            color: Color(0xFF64748B),
+            color: Color(0xFF94A3B8),
             fontWeight: FontWeight.bold,
             fontSize: 8,
             letterSpacing: 2,
@@ -212,33 +216,33 @@ class RockAreaLogo extends StatelessWidget {
   }
 }
 
-class _RockAreaLogoPainter extends CustomPainter {
+class _OrangeCrystalPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final double s = size.width;
 
+    // Скругленный оранжевый контейнер
     final bgRRect = RRect.fromRectAndRadius(
       Rect.fromLTWH(0, 0, s, s),
-      Radius.circular(s * 0.22),
+      Radius.circular(s * 0.24),
     );
-    canvas.drawRRect(bgRRect, Paint()..color = const Color(0xFF0F172A));
+    canvas.drawRRect(bgRRect, Paint()..color = const Color(0xFFFFF7ED));
+    canvas.drawRRect(
+      bgRRect,
+      Paint()
+        ..color = const Color(0xFFFDBA74).withOpacity(0.5)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
 
-    final gridPaint = Paint()
-      ..color = const Color(0xFF334155).withOpacity(0.35)
-      ..strokeWidth = 1.0;
-
-    for (double i = 0.25; i <= 0.75; i += 0.25) {
-      canvas.drawLine(Offset(s * 0.18, s * i), Offset(s * 0.82, s * i), gridPaint);
-      canvas.drawLine(Offset(s * i, s * 0.18), Offset(s * i, s * 0.82), gridPaint);
-    }
-
-    final pTop = Offset(s * 0.50, s * 0.19);
-    final pLeft = Offset(s * 0.28, s * 0.33);
-    final pRight = Offset(s * 0.72, s * 0.33);
-    final pMidL = Offset(s * 0.36, s * 0.51);
-    final pMidR = Offset(s * 0.64, s * 0.51);
-    final pCenter = Offset(s * 0.50, s * 0.43);
-    final pBottom = Offset(s * 0.50, s * 0.67);
+    // Геометрия кристалла керна
+    final pTop = Offset(s * 0.50, s * 0.20);
+    final pLeft = Offset(s * 0.28, s * 0.36);
+    final pRight = Offset(s * 0.72, s * 0.36);
+    final pCenter = Offset(s * 0.50, s * 0.46);
+    final pMidL = Offset(s * 0.36, s * 0.58);
+    final pMidR = Offset(s * 0.64, s * 0.58);
+    final pBottom = Offset(s * 0.50, s * 0.74);
 
     void drawFacet(List<Offset> points, Color color) {
       final path = Path()..moveTo(points[0].dx, points[0].dy);
@@ -249,23 +253,25 @@ class _RockAreaLogoPainter extends CustomPainter {
       canvas.drawPath(path, Paint()..color = color);
     }
 
-    drawFacet([pTop, pLeft, pMidL, pCenter], const Color(0xFF2563EB));
-    drawFacet([pTop, pRight, pMidR, pCenter], const Color(0xFF60A5FA));
-    drawFacet([pLeft, pMidL, pBottom], const Color(0xFF1D4ED8));
+    // Теплые оранжевые грани
+    drawFacet([pTop, pLeft, pCenter], const Color(0xFFFB923C));
+    drawFacet([pTop, pRight, pCenter], const Color(0xFFFDBA74));
+    drawFacet([pLeft, pMidL, pBottom], const Color(0xFFEA580C));
     drawFacet([pMidL, pMidR, pBottom], const Color(0xFFF97316));
-    drawFacet([pRight, pMidR, pBottom], const Color(0xFF3B82F6));
+    drawFacet([pRight, pMidR, pBottom], const Color(0xFFC2410C));
 
-    void drawNode(Offset o, Color inner, Color border) {
-      canvas.drawCircle(o, s * 0.022, Paint()..color = inner);
-      canvas.drawCircle(o, s * 0.022, Paint()..color = border..strokeWidth = 1.5..style = PaintingStyle.stroke);
+    // Узлы
+    void drawNode(Offset o, Color inner) {
+      canvas.drawCircle(o, s * 0.024, Paint()..color = inner);
+      canvas.drawCircle(o, s * 0.024, Paint()..color = Colors.white..strokeWidth = 1.8..style = PaintingStyle.stroke);
     }
 
-    drawNode(pTop, Colors.white, const Color(0xFF2563EB));
-    drawNode(pLeft, Colors.white, const Color(0xFF2563EB));
-    drawNode(pRight, Colors.white, const Color(0xFF2563EB));
-    drawNode(pMidL, const Color(0xFFF97316), Colors.white);
-    drawNode(pMidR, const Color(0xFFF97316), Colors.white);
-    drawNode(pBottom, Colors.white, const Color(0xFFF97316));
+    drawNode(pTop, const Color(0xFFEA580C));
+    drawNode(pLeft, const Color(0xFFEA580C));
+    drawNode(pRight, const Color(0xFFEA580C));
+    drawNode(pMidL, const Color(0xFFF97316));
+    drawNode(pMidR, const Color(0xFFF97316));
+    drawNode(pBottom, Colors.white);
   }
 
   @override
