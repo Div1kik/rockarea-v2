@@ -29,9 +29,12 @@ jobs:
       - name: Generate Android project structure
         run: flutter create . --project-name rockarea --org com.rockarea --platforms android
 
-      - name: Inject Custom RockArea Desktop Icon
+      - name: Force Custom Desktop Icon
         run: |
-          # 1. Задаем темный фирменный фон для ярлыка (#0F172A)
+          # 1. Удаляем все стандартные картинки робота Flutter из всех папок mipmap
+          find android/app/src/main/res/ -name "ic_launcher*.png" -delete
+
+          # 2. Цвет фона (#0F172A)
           mkdir -p android/app/src/main/res/values
           cat << 'EOF' > android/app/src/main/res/values/colors.xml
           <?xml version="1.0" encoding="utf-8"?>
@@ -40,9 +43,9 @@ jobs:
           </resources>
           EOF
 
-          # 2. Создаем векторную эмблему керна (ic_launcher_foreground.xml)
-          mkdir -p android/app/src/main/res/drawable-v24
-          cat << 'EOF' > android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
+          # 3. Векторный передний план (кристалл керна)
+          mkdir -p android/app/src/main/res/drawable
+          cat << 'EOF' > android/app/src/main/res/drawable/ic_launcher_foreground.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
               android:height="108dp"
@@ -87,6 +90,16 @@ jobs:
                   android:fillColor="#FFFFFF"
                   android:pathData="M54,71 A2.2,2.2 0 1,0 54,75.4 A2.2,2.2 0 1,0 54,71" />
           </vector>
+          EOF
+
+          # 4. Главный файл адаптивной иконки для Android 8+
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          cat << 'EOF' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background"/>
+              <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
           EOF
 
       - name: Install dependencies
