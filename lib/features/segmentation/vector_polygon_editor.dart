@@ -34,7 +34,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   bool _isA4CalibMode = false;
   bool _isLassoMode = false;
+  bool _isEraserMode = false;
+  double _eraserRadius = 24.0;
+
   final List<Offset> _lassoPoints = [];
+  final List<Offset> _eraserStroke = [];
 
   List<Offset> _a4Corners = [];
 
@@ -83,7 +87,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         title: const Text('Прекратить разметку?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        content: const Text('Несохранённые контуры и расчёты серии будут утеряны. Вы действительно хотите выйти?'),
+        content: const Text('Несохранённые контуры серии будут утеряны. Выйти?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Остаться')),
           ElevatedButton(
@@ -133,6 +137,79 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     return Offset(local.dx.clamp(0.0, box.size.width), local.dy.clamp(0.0, box.size.height));
   }
 
+  // Обрезка выпирающих лучей ластиком
+  void _applyEraserCut() {
+    if (_eraserStroke.length < 2 || _activePolygonIndex == -1) return;
+    final poly = _polygons[_activePolygonIndex];
+    if (poly.points.length < 4) return;
+
+    _saveToHistory();
+
+    // Удаляем из активного контура вершины, попавшие под мазок ластика
+    final List<Offset> updated = [];
+    for (final pt in poly.points) {
+      bool hit = false;
+      for (final ePt in _eraserStroke) {
+        if ((pt - ePt).distance <= _eraserRadius) {
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) updated.add(pt);
+    }
+
+    if (updated.length >= 3) {
+      setState(() {
+        poly.points = updated;
+      });
+    }
+  }
+
+  void _showEraserSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Диаметр срезающего ластика', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: _eraserRadius * 2,
+                    height: _eraserRadius * 2,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDC2626).withOpacity(0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFFDC2626), width: 2),
+                    ),
+                  ),
+                ],
+              ),
+              Slider(
+                value: _eraserRadius,
+                min: 10.0,
+                max: 60.0,
+                activeColor: const Color(0xFFDC2626),
+                onChanged: (val) {
+                  setSheetState(() => _eraserRadius = val);
+                  setState(() => _eraserRadius = val);
+                },
+              ),
+              Text('${_eraserRadius.toStringAsFixed(0)} px', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _onPointerDown(PointerDownEvent e) {
     _pointerCount++;
     if (_pointerCount >= 2) {
@@ -150,11 +227,20 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     _lastLocalTouch = localPos;
     if (_isA4CalibMode) return;
 
+    if (_isEraserMode) {
+      setState(() {
+        _eraserStroke.clear();
+        _eraserStroke.add(localPos);
+      });
+      return;
+    }
+
     if (_isLassoMode) {
       _saveToHistory();
       setState(() {
         _lassoPoints.clear();
         _lassoPoints.add(localPos);
+        _targetNodeLocal = localPos;
       });
       return;
     }
@@ -214,10 +300,18 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     final RenderBox box = _canvasKey.currentContext!.findRenderObject() as RenderBox;
     final Size canvasSize = box.size;
 
+    if (_isEraserMode) {
+      setState(() {
+        _eraserStroke.add(localPos);
+      });
+      return;
+    }
+
     if (_isLassoMode) {
       setState(() {
         if (_lassoPoints.isEmpty || (_lassoPoints.last - localPos).distance > 4.0) {
           _lassoPoints.add(localPos);
+          _targetNodeLocal = localPos; // Активирует лупу во время лассо
         }
       });
       return;
@@ -248,6 +342,15 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   void _onPointerUp(PointerUpEvent e) {
     _pointerCount = (_pointerCount - 1).clamp(0, 5);
 
+    if (_isEraserMode && _eraserStroke.isNotEmpty) {
+      _applyEraserCut();
+      setState(() {
+        _eraserStroke.clear();
+        _isEraserMode = false;
+      });
+      return;
+    }
+
     if (_isLassoMode && _lassoPoints.length > 5) {
       final int nextNum = _polygons.length + 1;
       setState(() {
@@ -255,11 +358,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         _activePolygonIndex = _polygons.length - 1;
         _lassoPoints.clear();
         _isLassoMode = false;
+        _targetNodeLocal = null;
       });
       return;
     }
 
-    if (!_isPanningOrZooming && _pointerCount == 0 && _tapDownPosition != null && !_isA4CalibMode && !_isLassoMode) {
+    if (!_isPanningOrZooming && _pointerCount == 0 && _tapDownPosition != null && !_isA4CalibMode && !_isLassoMode && !_isEraserMode) {
       final double travel = (e.position - _tapDownPosition!).distance;
       if (travel < 10.0 && _activePointIndex == -1 && !_isDraggingWholeObject) {
         final localPos = _screenToCanvas(e.position);
@@ -337,6 +441,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       context,
       MaterialPageRoute(
         builder: (_) => StrengthCalculatorSheet(
+          title: 'Расчёт нагрузки',
           initialSamples: items,
           onSaved: (updated) {
             for (int i = 0; i < updated.length; i++) {
@@ -390,7 +495,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(backgroundColor: Color(0xFF2563EB), content: Text('Серия испытаний успешно сохранена в журнал!')),
+        const SnackBar(backgroundColor: Color(0xFF2563EB), content: Text('Серия испытаний сохранена в журнал!')),
       );
       Navigator.pop(context);
     }
@@ -459,7 +564,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                 : Size(constraints.maxWidth, constraints.maxWidth / imgAspect);
 
             _recalculateScale(canvasSize);
-            final bool isManipulating = _activePointIndex != -1 || _isDraggingWholeObject || _isLassoMode;
+            final bool isManipulating = _activePointIndex != -1 || _isDraggingWholeObject || _isLassoMode || _isEraserMode;
 
             return Column(
               children: [
@@ -496,6 +601,8 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                     activeIndex: _activePolygonIndex,
                                     activePointIndex: _activePointIndex,
                                     lassoPoints: _lassoPoints,
+                                    eraserStroke: _eraserStroke,
+                                    eraserRadius: _eraserRadius,
                                   ),
                                 ),
 
@@ -556,11 +663,13 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                 _activePointIndex = -1;
                                 _isDraggingWholeObject = false;
                                 _targetNodeLocal = null;
+                                _eraserStroke.clear();
                               });
                             },
                           ),
                         ),
 
+                      // Лупа (работает как при перетягивании точек, так и при рисовании Лассо)
                       if (_targetNodeLocal != null && _decodedImage != null)
                         Positioned(
                           top: 14,
@@ -591,6 +700,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
+                      // Панель инструментов
                       Positioned(
                         bottom: 12,
                         left: 16,
@@ -610,6 +720,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                   onPressed: () => setState(() {
                                     _isA4CalibMode = !_isA4CalibMode;
                                     _isLassoMode = false;
+                                    _isEraserMode = false;
                                     _activePointIndex = -1;
                                   }),
                                   icon: Icon(Icons.crop_free, size: 16, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF475569)),
@@ -623,13 +734,28 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                   onPressed: () => setState(() {
                                     _isLassoMode = !_isLassoMode;
                                     _isA4CalibMode = false;
+                                    _isEraserMode = false;
                                   }),
+                                ),
+                                Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
+                                // Ластик (короткий тап — режим срезки луча, долгий тап — выбор размера)
+                                GestureDetector(
+                                  onLongPress: _showEraserSettings,
+                                  child: IconButton(
+                                    icon: Icon(Icons.auto_fix_high, size: 18, color: _isEraserMode ? const Color(0xFFDC2626) : const Color(0xFF475569)),
+                                    tooltip: 'Ластик (Зажмите для размера)',
+                                    onPressed: () => setState(() {
+                                      _isEraserMode = !_isEraserMode;
+                                      _isLassoMode = false;
+                                      _isA4CalibMode = false;
+                                    }),
+                                  ),
                                 ),
                                 Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
                                 TextButton.icon(
                                   onPressed: _polygons.isNotEmpty ? _openStrengthCalculator : null,
                                   icon: const Icon(Icons.calculate_outlined, size: 16, color: Color(0xFF2563EB)),
-                                  label: const Text('ГОСТ 24941', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                  label: const Text('Расчёт нагрузки', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                                 ),
                               ],
                             ),
@@ -643,6 +769,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                   ),
                 ),
 
+                // Нижний блок со списком
                 Container(
                   height: 200,
                   decoration: const BoxDecoration(
@@ -766,16 +893,35 @@ class _CleanPolygonPainter extends CustomPainter {
   final int activeIndex;
   final int activePointIndex;
   final List<Offset> lassoPoints;
+  final List<Offset> eraserStroke;
+  final double eraserRadius;
 
   _CleanPolygonPainter({
     required this.polygons,
     required this.activeIndex,
     required this.activePointIndex,
     required this.lassoPoints,
+    required this.eraserStroke,
+    required this.eraserRadius,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Отрисовка траектории ластика
+    if (eraserStroke.length > 1) {
+      final eraserPaint = Paint()
+        ..color = const Color(0xFFDC2626).withOpacity(0.4)
+        ..strokeWidth = eraserRadius * 2
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      final ePath = Path()..moveTo(eraserStroke.first.dx, eraserStroke.first.dy);
+      for (int i = 1; i < eraserStroke.length; i++) {
+        ePath.lineTo(eraserStroke[i].dx, eraserStroke[i].dy);
+      }
+      canvas.drawPath(ePath, eraserPaint);
+    }
+
     if (lassoPoints.length > 1) {
       final lassoPaint = Paint()..color = const Color(0xFFF97316)..strokeWidth = 2.5..style = PaintingStyle.stroke;
       final lPath = Path()..moveTo(lassoPoints.first.dx, lassoPoints.first.dy);
