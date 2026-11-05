@@ -202,7 +202,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     _lastLocalTouch = localPos;
   }
 
-  void _onPointerUp(PointerUpEvent e) {
+  void _handlePointerEnd() {
     setState(() {
       _activePointIndex = -1;
       _activeA4CornerIndex = -1;
@@ -425,18 +425,16 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                       ),
                     ),
 
-                    // Точный сенсорный слой
                     Positioned.fill(
                       child: Listener(
                         behavior: HitTestBehavior.translucent,
                         onPointerDown: _onPointerDown,
                         onPointerMove: _onPointerMove,
-                        onPointerUp: _onPointerUp,
-                        onPointerCancel: _onPointerUp,
+                        onPointerUp: (_) => _handlePointerEnd(),
+                        onPointerCancel: (_) => _handlePointerEnd(),
                       ),
                     ),
 
-                    // Лупа строго над точкой касания пальца (с оффсетом вверх на 90px)
                     if (_magnifierScreenPos != null && (_activePointIndex != -1 || _activeA4CornerIndex != -1))
                       Positioned(
                         left: (_magnifierScreenPos!.dx - 55).clamp(10.0, constraints.maxWidth - 120.0),
@@ -695,7 +693,6 @@ class _CleanPolygonPainter extends CustomPainter {
       canvas.drawPath(path, fillPaint);
       canvas.drawPath(path, strokePaint);
 
-      // Подсвечиваем узел крупно только когда его тащат пальцем
       if (isSelected && activePointIndex != -1 && activePointIndex < poly.points.length) {
         final nodePaint = Paint()..color = const Color(0xFFF97316);
         final borderPaint = Paint()
