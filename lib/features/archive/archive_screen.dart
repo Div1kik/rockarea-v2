@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../core/archive_service.dart';
+import '../../core/export_service.dart';
 import '../strength/strength_calculator_sheet.dart';
 
 class ArchiveScreen extends StatefulWidget {
@@ -68,6 +69,78 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     );
   }
 
+  void _showRecordExportMenu(TestRecord record) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Экспорт данных: ${record.id}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
+            const SizedBox(height: 4),
+            const Text('Выберите необходимый тип выгрузки:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+            const SizedBox(height: 14),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(8)),
+                child: const Icon(Icons.straighten, color: Color(0xFF2563EB)),
+              ),
+              title: const Text('Ведомость только площадей (Геометрия)', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Изолированная таблица размеров и калибровки', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(ctx);
+                ExportService.exportGeometryOnly(context: context, record: record, shareImmediately: false);
+              },
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(8)),
+                child: const Icon(Icons.calculate_outlined, color: Color(0xFF059669)),
+              ),
+              title: const Text('Полный протокол ГОСТ 24941-81', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Ведомость со всеми 13 столбцами и формулами', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(ctx);
+                final List<SampleStrengthData> items = record.samples.map((s) {
+                  final raw = s.name.split(RegExp(r'\s+'));
+                  return SampleStrengthData(
+                    part1: raw.isNotEmpty ? raw[0] : 'БАМ',
+                    part2: raw.length > 1 ? raw[1] : '1',
+                    part3: raw.length > 2 ? raw[2] : '1',
+                    areaCm2: s.areaCm2,
+                    loadKn: s.loadKn,
+                    condition: s.condition,
+                  );
+                }).toList();
+
+                final validTensile = items.where((e) => e.tensileStrengthMpa > 0).toList();
+                final avgT = validTensile.isNotEmpty ? validTensile.map((e) => e.tensileStrengthMpa).reduce((a, b) => a + b) / validTensile.length : 0.0;
+
+                final validComp = items.where((e) => e.compStrengthMpa > 0).toList();
+                final avgC = validComp.isNotEmpty ? validComp.map((e) => e.compStrengthMpa).reduce((a, b) => a + b) / validComp.length : 0.0;
+
+                ExportService.exportGostProtocol(
+                  context: context,
+                  seriesId: record.id,
+                  samples: items,
+                  avgTensile: avgT,
+                  avgComp: avgC,
+                  shareImmediately: false,
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _delete(String id) async {
     await ArchiveService.deleteRecord(id);
     _load();
@@ -116,6 +189,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                   ),
                                 ),
                                 IconButton(
+                                  icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB), size: 22),
+                                  tooltip: 'Сохранить таблицы',
+                                  onPressed: () => _showRecordExportMenu(rec),
+                                ),
+                                IconButton(
                                   icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626), size: 20),
                                   onPressed: () => _delete(rec.id),
                                 ),
@@ -152,11 +230,22 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFF475569),
+                                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  ),
+                                  icon: const Icon(Icons.straighten, size: 14),
+                                  label: const Text('Геометрия', style: TextStyle(fontSize: 11)),
+                                  onPressed: () => ExportService.exportGeometryOnly(context: context, record: rec, shareImmediately: false),
+                                ),
+                                const SizedBox(width: 8),
                                 ElevatedButton.icon(
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF2563EB),
                                     foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
                                   icon: const Icon(Icons.calculate_outlined, size: 16),
