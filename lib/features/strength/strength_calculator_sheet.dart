@@ -6,6 +6,7 @@ class SampleStrengthData {
   String part1;
   String part2;
   String part3;
+  String part4;
   String borehole;
   String interval;
   String condition;
@@ -17,6 +18,7 @@ class SampleStrengthData {
     required this.part1,
     required this.part2,
     required this.part3,
+    this.part4 = '1',
     this.borehole = '-',
     this.interval = '-',
     this.condition = 'n',
@@ -44,7 +46,7 @@ class StrengthCalculatorSheet extends StatefulWidget {
 
   const StrengthCalculatorSheet({
     super.key,
-    this.title = 'Расчёт нагрузки',
+    this.title = 'Результаты испытаний',
     required this.initialSamples,
     required this.onSaved,
   });
@@ -74,58 +76,12 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
     return valid.map((s) => s.compStrengthMpa).reduce((a, b) => a + b) / valid.length;
   }
 
-  void _showExportOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Экспорт: Расчёт нагрузки', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
-            const SizedBox(height: 14),
-            ListTile(
-              leading: const Icon(Icons.download, color: Color(0xFF2563EB)),
-              title: const Text('Сохранить в Загрузки', style: TextStyle(fontWeight: FontWeight.w600)),
-              onTap: () {
-                Navigator.pop(ctx);
-                ExportService.exportGostProtocol(
-                  context: context,
-                  seriesId: widget.title,
-                  samples: _samples,
-                  avgTensile: _avgTensile,
-                  avgComp: _avgComp,
-                  shareImmediately: false,
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.share_outlined, color: Color(0xFFF97316)),
-              title: const Text('Отправить', style: TextStyle(fontWeight: FontWeight.w600)),
-              onTap: () {
-                Navigator.pop(ctx);
-                ExportService.exportGostProtocol(
-                  context: context,
-                  seriesId: widget.title,
-                  samples: _samples,
-                  avgTensile: _avgTensile,
-                  avgComp: _avgComp,
-                  shareImmediately: true,
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _editSample(int index) {
     final s = _samples[index];
-    final cipherCtrl = TextEditingController(text: '${s.part1} ${s.part2} ${s.part3}'.trim());
+    final p1Ctrl = TextEditingController(text: s.part1);
+    final p2Ctrl = TextEditingController(text: s.part2);
+    final p3Ctrl = TextEditingController(text: s.part3);
+    final p4Ctrl = TextEditingController(text: s.part4);
     final loadCtrl = TextEditingController(text: s.loadKn > 0 ? s.loadKn.toString() : '');
     String condition = s.condition;
 
@@ -140,26 +96,30 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Шифр пробы (3 значения через пробел):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                TextField(
-                  controller: cipherCtrl,
-                  decoration: const InputDecoration(
-                    hintText: 'БАМ 1 1',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
+                const Text('Шифр пробы (4 графы):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(child: TextField(controller: p1Ctrl, decoration: const InputDecoration(labelText: 'АБВ', isDense: true, border: OutlineInputBorder()))),
+                    const SizedBox(width: 4),
+                    Expanded(child: TextField(controller: p2Ctrl, decoration: const InputDecoration(labelText: '1', isDense: true, border: OutlineInputBorder()))),
+                    const SizedBox(width: 4),
+                    Expanded(child: TextField(controller: p3Ctrl, decoration: const InputDecoration(labelText: '1', isDense: true, border: OutlineInputBorder()))),
+                    const SizedBox(width: 4),
+                    Expanded(child: TextField(controller: p4Ctrl, decoration: const InputDecoration(labelText: '1', isDense: true, border: OutlineInputBorder()))),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 Text('Площадь скола S: ${s.areaCm2.toStringAsFixed(2)} см²',
                     style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                 const SizedBox(height: 12),
-                const Text('Разрушающая нагрузка P (кН):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                const Text('Разрушающая нагрузка P (кН):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
                 TextField(
                   controller: loadCtrl,
                   autofocus: true,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
-                    hintText: '14.5',
+                    hintText: '0.00',
                     border: OutlineInputBorder(),
                     contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
@@ -186,11 +146,11 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white),
               onPressed: () {
-                final raw = cipherCtrl.text.trim().split(RegExp(r'\s+'));
                 setState(() {
-                  s.part1 = raw.isNotEmpty ? raw[0] : '-';
-                  s.part2 = raw.length > 1 ? raw[1] : '-';
-                  s.part3 = raw.length > 2 ? raw[2] : '-';
+                  s.part1 = p1Ctrl.text.trim();
+                  s.part2 = p2Ctrl.text.trim();
+                  s.part3 = p3Ctrl.text.trim();
+                  s.part4 = p4Ctrl.text.trim();
                   s.loadKn = double.tryParse(loadCtrl.text.replaceAll(',', '.')) ?? 0.0;
                   s.condition = condition;
                 });
@@ -216,8 +176,15 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
         actions: [
           IconButton(
             icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB)),
-            tooltip: 'Экспорт таблицы',
-            onPressed: _showExportOptions,
+            tooltip: 'Экспорт таблицы с формулами',
+            onPressed: () => ExportService.exportGostProtocol(
+              context: context,
+              seriesId: widget.title,
+              samples: _samples,
+              avgTensile: _avgTensile,
+              avgComp: _avgComp,
+              shareImmediately: false,
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -257,7 +224,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('СР. СЖАТИЕ Rc', style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
-                      Text('${_avgComp.toStringAsFixed(2)} МПа', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
+                      Text('${_avgComp.toStringAsFixed(1)} МПа', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
                     ],
                   ),
                 ),
@@ -282,7 +249,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                   ),
                   title: Row(
                     children: [
-                      Text('${s.part1} | ${s.part2} | ${s.part3}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      Text('${s.part1} | ${s.part2} | ${s.part3} | ${s.part4}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -292,7 +259,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                     ],
                   ),
                   subtitle: Text(
-                    'S = ${s.areaCm2.toStringAsFixed(2)} см² | P = ${s.loadKn > 0 ? '${s.loadKn} кН' : 'не задана'}',
+                    'S = ${s.areaCm2.toStringAsFixed(2)} см² | P = ${s.loadKn > 0 ? '${s.loadKn} кН' : '0.00'}',
                     style: TextStyle(fontSize: 11, color: s.loadKn > 0 ? const Color(0xFF64748B) : const Color(0xFFDC2626)),
                   ),
                   trailing: Column(
