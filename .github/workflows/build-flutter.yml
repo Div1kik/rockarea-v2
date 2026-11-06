@@ -29,15 +29,19 @@ jobs:
       - name: Generate Android project structure
         run: flutter create . --project-name rockarea --org com.rockarea --platforms android
 
-      - name: Force Custom Desktop Icon and App Title
+      - name: Configure Android SDK and Desktop Icon
         run: |
-          # 1. Задаем красивое имя приложения на рабочем столе с большой буквы
+          # 1. Повышаем compileSdk и targetSdk до 35
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' android/app/build.gradle || true
+
+          # 2. Имя приложения с заглавных букв
           sed -i 's/android:label="rockarea"/android:label="RockArea"/g' android/app/src/main/AndroidManifest.xml
 
-          # 2. Удаляем старые стандартные картинки робота Flutter
+          # 3. Удаляем старые картинки робота
           find android/app/src/main/res/ -name "ic_launcher*.png" -delete
 
-          # 3. Цвет фона ярлыка (#0F172A)
+          # 4. Цвет фона (#0F172A)
           mkdir -p android/app/src/main/res/values
           cat << 'EOF' > android/app/src/main/res/values/colors.xml
           <?xml version="1.0" encoding="utf-8"?>
@@ -46,7 +50,7 @@ jobs:
           </resources>
           EOF
 
-          # 4. Векторный передний план (кристалл керна)
+          # 5. Векторный передний план
           mkdir -p android/app/src/main/res/drawable
           cat << 'EOF' > android/app/src/main/res/drawable/ic_launcher_foreground.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -95,7 +99,7 @@ jobs:
           </vector>
           EOF
 
-          # 5. Адаптивная иконка для Android
+          # 6. Адаптивная иконка
           mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           cat << 'EOF' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           <?xml version="1.0" encoding="utf-8"?>
