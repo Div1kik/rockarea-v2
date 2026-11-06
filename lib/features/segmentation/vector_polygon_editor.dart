@@ -82,23 +82,49 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   Future<bool> _confirmExit() async {
     if (_polygons.isEmpty) return true;
-    final res = await showDialog<bool>(
+
+    final bool? result = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        title: const Text('Прекратить разметку?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        content: const Text('Несохранённые контуры серии будут утеряны. Выйти?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Остаться')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Выйти'),
+      barrierDismissible: false,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Color(0xFFF97316), size: 24),
+              SizedBox(width: 8),
+              Text(
+                'Завершить разметку?',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A)),
+              ),
+            ],
           ),
-        ],
-      ),
+          content: const Text(
+            'Все не сохраненные контуры и площади текущей серии будут утеряны. Вы действительно хотите выйти?',
+            style: TextStyle(fontSize: 13, color: Color(0xFF475569)),
+          ),
+          actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Остаться', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Выйти', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
     );
-    return res ?? false;
+
+    return result ?? false;
   }
 
   void _saveToHistory() {
@@ -137,7 +163,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     return Offset(local.dx.clamp(0.0, box.size.width), local.dy.clamp(0.0, box.size.height));
   }
 
-  // Обрезка выпирающих лучей ластиком со стягиванием контура
   void _applyEraserCut() {
     if (_eraserStroke.length < 2 || _activePolygonIndex == -1) return;
     final poly = _polygons[_activePolygonIndex];
@@ -468,12 +493,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
 
     return PopScope(
-      canPop: false,
-      onPopInvoked: (didPop) async {
+      canPop: _polygons.isEmpty,
+      onPopInvokedWithResult: (bool didPop, dynamic result) async {
         if (didPop) return;
-        final shouldExit = await _confirmExit();
-        if (shouldExit && context.mounted) {
-          Navigator.pop(context);
+        final bool shouldLeave = await _confirmExit();
+        if (shouldLeave && context.mounted) {
+          Navigator.of(context).pop();
         }
       },
       child: Scaffold(
@@ -485,7 +510,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: Color(0xFF0F172A)),
             onPressed: () async {
-              if (await _confirmExit() && context.mounted) Navigator.pop(context);
+              final bool shouldLeave = await _confirmExit();
+              if (shouldLeave && context.mounted) {
+                Navigator.of(context).pop();
+              }
             },
           ),
           actions: [
@@ -623,7 +651,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
-                      // Лупа
                       if (_targetNodeLocal != null && _decodedImage != null)
                         Positioned(
                           top: 14,
@@ -654,7 +681,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
-                      // Ползунок размера ластика
                       if (_isEraserMode)
                         Positioned(
                           bottom: 74,
@@ -689,7 +715,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
-                      // Компактная панель инструментов (без переполнения)
                       Positioned(
                         bottom: 12,
                         left: 12,
