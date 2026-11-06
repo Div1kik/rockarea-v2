@@ -76,9 +76,9 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
 
   void _editSample(int index) {
     final s = _samples[index];
-    final p1Ctrl = TextEditingController(text: s.part1);
-    final p2Ctrl = TextEditingController(text: s.part2);
-    final p3Ctrl = TextEditingController(text: s.part3);
+    // Единый текст шифра через пробел, либо пустая строка
+    final initialCipher = [s.part1, s.part2, s.part3].where((e) => e.isNotEmpty).join(' ');
+    final cipherCtrl = TextEditingController(text: initialCipher);
     final loadCtrl = TextEditingController(text: s.loadKn > 0 ? s.loadKn.toString() : '');
     String condition = s.condition;
 
@@ -94,22 +94,25 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Шифр пробы (3 поля):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                const Text('Шифр пробы (через пробел):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(child: TextField(controller: p1Ctrl, decoration: const InputDecoration(hintText: 'БАМ', hintStyle: TextStyle(color: Color(0xFF94A3B8)), isDense: true, border: OutlineInputBorder()))),
-                    const SizedBox(width: 4),
-                    Expanded(child: TextField(controller: p2Ctrl, decoration: const InputDecoration(hintText: '1', hintStyle: TextStyle(color: Color(0xFF94A3B8)), isDense: true, border: OutlineInputBorder()))),
-                    const SizedBox(width: 4),
-                    Expanded(child: TextField(controller: p3Ctrl, decoration: const InputDecoration(hintText: '1', hintStyle: TextStyle(color: Color(0xFF94A3B8)), isDense: true, border: OutlineInputBorder()))),
-                  ],
+                // Единое пустое поле с серым примером
+                TextField(
+                  controller: cipherCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'БАМ 1 1',
+                    hintStyle: TextStyle(color: Color(0xFF94A3B8)),
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Text('Площадь скола S: ${s.areaCm2.toStringAsFixed(2)} см²',
                     style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                 const SizedBox(height: 12),
                 const Text('Разрушающая нагрузка P (кН):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
                 TextField(
                   controller: loadCtrl,
                   autofocus: true,
@@ -118,7 +121,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                     hintText: '0.00',
                     hintStyle: TextStyle(color: Color(0xFF94A3B8)),
                     border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -143,10 +146,11 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white),
               onPressed: () {
+                final raw = cipherCtrl.text.trim().split(RegExp(r'\s+'));
                 setState(() {
-                  s.part1 = p1Ctrl.text.trim();
-                  s.part2 = p2Ctrl.text.trim();
-                  s.part3 = p3Ctrl.text.trim();
+                  s.part1 = raw.isNotEmpty ? raw[0] : '';
+                  s.part2 = raw.length > 1 ? raw[1] : '';
+                  s.part3 = raw.length > 2 ? raw[2] : '';
                   s.loadKn = double.tryParse(loadCtrl.text.replaceAll(',', '.')) ?? 0.0;
                   s.condition = condition;
                 });
@@ -172,14 +176,14 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
         actions: [
           IconButton(
             icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB)),
-            tooltip: 'Экспорт таблицы с формулами',
+            tooltip: 'Мгновенный экспорт в Загрузки',
             onPressed: () => ExportService.exportGostProtocol(
               context: context,
               seriesId: widget.title,
               samples: _samples,
               avgTensile: _avgTensile,
               avgComp: _avgComp,
-              shareImmediately: true,
+              shareImmediately: false,
             ),
           ),
           ElevatedButton(
@@ -234,7 +238,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFE2E8F0)),
               itemBuilder: (ctx, idx) {
                 final s = _samples[idx];
-                final cipherLabel = [s.part1, s.part2, s.part3].where((e) => e.isNotEmpty).join(' | ');
+                final cipherLabel = [s.part1, s.part2, s.part3].where((e) => e.isNotEmpty).join(' ');
 
                 return ListTile(
                   tileColor: Colors.white,
