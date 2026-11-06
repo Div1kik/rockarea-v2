@@ -7,28 +7,25 @@ import 'archive_service.dart';
 import '../features/strength/strength_calculator_sheet.dart';
 
 class ExportService {
+  /// Мгновенная запись CSV без блокирующих таймаутов Android FUSE
   static Future<File> _writeCsvFile({
     required String filename,
     required String content,
   }) async {
-    Directory? targetDir;
-
-    if (Platform.isAndroid) {
-      final publicDownload = Directory('/storage/emulated/0/Download');
-      try {
-        if (await publicDownload.exists()) {
-          targetDir = publicDownload;
-        }
-      } catch (_) {}
+    File file;
+    try {
+      final downloadDir = Directory('/storage/emulated/0/Download');
+      file = File('${downloadDir.path}/$filename');
+      final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
+      await file.writeAsBytes(bytes, flush: false);
+      return file;
+    } catch (_) {
+      final appDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+      file = File('${appDir.path}/$filename');
+      final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
+      await file.writeAsBytes(bytes, flush: false);
+      return file;
     }
-
-    targetDir ??= await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-
-    final file = File('${targetDir.path}/$filename');
-    // Маркер UTF-8 BOM для корректного открытия кириллицы
-    final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
   }
 
   /// 1. Ведомость «Площади»
@@ -45,7 +42,7 @@ class ExportService {
 
     for (int i = 0; i < record.samples.length; i++) {
       final s = record.samples[i];
-      sb.writeln('${i + 1};${s.name};${s.areaCm2.toStringAsFixed(2).replaceAll('.', ',')}');
+      sb.writeln('${i + 1};${s.name};${s.areaCm2.toStringAsFixed(2)}');
     }
 
     final safeId = record.id.replaceAll(RegExp(r'[^\w\d]'), '_');
@@ -56,8 +53,13 @@ class ExportService {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF2563EB),
-          content: Text('Файл сохранен в Загрузки:\n${savedFile.path}'),
-          duration: const Duration(seconds: 4),
+          content: Text('Файл мгновенно сохранен:\n${savedFile.path}'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Отправить',
+            textColor: Colors.white,
+            onPressed: () => Share.shareXFiles([XFile(savedFile.path)]),
+          ),
         ),
       );
     }
@@ -67,7 +69,7 @@ class ExportService {
     }
   }
 
-  /// 2. Результаты испытаний ГОСТ 24941-81 с вертикальной шапкой и формулами
+  /// 2. Результаты испытаний ГОСТ 24941-81 с чистой многострочной шапкой (без дефисов)
   static Future<void> exportGostProtocol({
     required BuildContext context,
     required String seriesId,
@@ -78,23 +80,23 @@ class ExportService {
   }) async {
     final sb = StringBuffer();
 
-    // 1-я строка: Вертикальная компактная шапка с переносами строк \n
+    // 1-я строка: Высокая шапка с цельными словами (без дефисов)
     sb.writeln(
       '№;'
       '"Шифр\nпробы";;;'
-      '"№ Сква-\nжины";'
-      '"Интер-\nвал, м";'
+      '"№ Скважины";'
+      '"Интервал, м";'
       'Состояние;'
       '"Литологический\nтип";;'
-      '"Площадь\nскола,\nсм2";'
-      '"Разрушающая\nнагрузка,\nкН";'
+      '"Площадь скола,\nсм2";'
+      '"Разрушающая\nнагрузка, кН";'
       'K;'
-      '"Предел прочности\nна растяжение,\nМПа";'
-      '"Среднее значение\nпредела прочности\nна растяжение, МПа";'
+      '"Предел прочности на\nрастяжение, МПа";'
+      '"Среднее значение\nрастяжения, МПа";'
       '"Коэф.\nПересчета";'
       '"Шифр Коэф.\nПересчета";'
-      '"Предел прочности на сжатие\n(расчетным методом по\nГОСТ 24941-81), МПа";'
-      '"Среднее значение предела\nпрочности на сжатие\n(расчетным методом по\nГОСТ 24941-81), МПа"'
+      '"Предел прочности на сжатие\nпо ГОСТ 24941-81, МПа";'
+      '"Среднее значение\nсжатия, МПа"'
     );
 
     // 2-я строка: Номера граф по ГОСТ
@@ -117,14 +119,10 @@ class ExportService {
       final colH = s.lithology;
       final colI = '';
 
-      // Числа в таблице выводятся с запятой для корректного отображения
-      final colJ = s.areaCm2 > 0 ? s.areaCm2.toStringAsFixed(2).replaceAll('.', ',') : '0,00';
-      final colK = s.loadKn > 0 ? s.loadKn.toStringAsFixed(2).replaceAll('.', ',') : '0,00';
+      // Числовые значения через точку для моментального распознавания Таблицами
+      final colJ = s.areaCm2 > 0 ? s.areaCm2.toStringAsFixed(2) : '0.00';
+      final colK = s.loadKn > 0 ? s.loadKn.toStringAsFixed(2) : '0.00';
 
-      // 100% совместимые формулы для Google Таблиц и Excel:
-      // Имена функций стандартные латинские (ROUND, IF, AVERAGE, COUNT),
-      // числа в формулах с точкой (0.5076, 0.2506), аргументы разделены точкой с запятой (;),
-      // вся формула обернута в кавычки.
       final colL = '"=ROUND(0.5076*(J$r^0.2506); 2)"';
       final colM = '"=IF(J$r>0; ROUND((7.5*K$r*L$r)/J$r; 2); 0)"';
       final colN = (i == 0) ? '"=ROUND(AVERAGE(M$startRow:M$endRow); 2)"' : '';
@@ -144,8 +142,13 @@ class ExportService {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF059669),
-          content: Text('Файл сохранен в Загрузки:\n${savedFile.path}'),
+          content: Text('Файл мгновенно сохранен:\n${savedFile.path}'),
           duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Отправить',
+            textColor: Colors.white,
+            onPressed: () => Share.shareXFiles([XFile(savedFile.path)]),
+          ),
         ),
       );
     }
