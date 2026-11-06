@@ -7,24 +7,36 @@ import 'archive_service.dart';
 import '../features/strength/strength_calculator_sheet.dart';
 
 class ExportService {
+  /// Прямая запись CSV в системную папку Загрузки телефона
   static Future<File> _writeCsvFile({
     required String filename,
     required String content,
   }) async {
-    // Мгновенная запись во временный кэш без системных зависаний Android Scoped Storage
-    final tempDir = await getTemporaryDirectory();
-    final file = File('${tempDir.path}/$filename');
+    Directory? targetDir;
 
+    if (Platform.isAndroid) {
+      final publicDownload = Directory('/storage/emulated/0/Download');
+      try {
+        if (await publicDownload.exists()) {
+          targetDir = publicDownload;
+        }
+      } catch (_) {}
+    }
+
+    targetDir ??= await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+
+    final file = File('${targetDir.path}/$filename');
+    // UTF-8 BOM для безупречного распознавания кириллицы
     final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
     await file.writeAsBytes(bytes, flush: true);
     return file;
   }
 
-  /// 1. Ведомость площадей
+  /// 1. Ведомость «Площади»
   static Future<void> exportGeometryOnly({
     required BuildContext context,
     required TestRecord record,
-    bool shareImmediately = true,
+    bool shareImmediately = false,
   }) async {
     final sb = StringBuffer();
     sb.writeln('ВЕДОМОСТЬ ПЛОЩАДЕЙ ОБРАЗЦОВ');
@@ -41,24 +53,33 @@ class ExportService {
     final filename = 'Площади_${safeId}.csv';
     final savedFile = await _writeCsvFile(filename: filename, content: sb.toString());
 
-    await Share.shareXFiles(
-      [XFile(savedFile.path)],
-      subject: 'Площади_${safeId}',
-      text: 'Ведомость площадей образцов',
-    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF2563EB),
+          content: Text('Файл сохранен в Загрузки:\n${savedFile.path}'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+
+    if (shareImmediately) {
+      await Share.shareXFiles([XFile(savedFile.path)], text: 'Ведомость площадей');
+    }
   }
 
-  /// 2. Результаты испытаний по ГОСТ 24941-81 с работающими формулами Excel
+  /// 2. Результаты испытаний ГОСТ 24941-81 с работающими русскими формулами Excel
   static Future<void> exportGostProtocol({
     required BuildContext context,
     required String seriesId,
     required List<SampleStrengthData> samples,
     required double avgTensile,
     required double avgComp,
-    bool shareImmediately = true,
+    bool shareImmediately = false,
   }) async {
     final sb = StringBuffer();
 
+    // Шапка таблицы (строго 18 столбцов: A - R)
     sb.writeln(
       '№;'
       'Шифр пробы;;;'
@@ -77,6 +98,7 @@ class ExportService {
       'Среднее значение предела прочности на сжатие (расчетным методом по ГОСТ 24941-81), МПа'
     );
 
+    // Номера граф по ГОСТ
     sb.writeln('1;2;;;3;4;5;6;;7;8;9;10;11;;;12;13');
 
     final int startRow = 3;
@@ -95,16 +117,21 @@ class ExportService {
       final colG = s.condition;
       final colH = s.lithology;
       final colI = '';
+
+      // Числовые значения через запятую (для распознавания русским Excel)
       final colJ = s.areaCm2 > 0 ? s.areaCm2.toStringAsFixed(2).replaceAll('.', ',') : '0,00';
       final colK = s.loadKn > 0 ? s.loadKn.toStringAsFixed(2).replaceAll('.', ',') : '0,00';
 
-      final colL = '=ROUND(0.5076*POWER(J$r;0.2506);2)';
-      final colM = '=IF(J$r>0;ROUND((7.5*K$r*L$r)/J$r;2);0)';
-      final colN = (i == 0) ? '=ROUND(AVERAGE(M$startRow:M$endRow);2)' : '';
-      final colO = '=IF(M$r<=0;"";IF(M$r<1;12;IF(M$r<5;16;20)))';
+      // 100% валидные формулы для русского Excel в CSV:
+      // Все формулы заключены в кавычки "", числа записаны через запятую (0,5076 и 0,2506),
+      // а функции названы на русском (ОКРУГЛ, ЕСЛИ, СРЗНАЧ).
+      final colL = '"=ОКРУГЛ(0,5076*(J$r^0,2506);2)"';
+      final colM = '"=ЕСЛИ(J$r>0;ОКРУГЛ((7,5*K$r*L$r)/J$r;2);0)"';
+      final colN = (i == 0) ? '"=ОКРУГЛ(СРЗНАЧ(M$startRow:M$endRow);2)"' : '';
+      final colO = '"=ЕСЛИ(M$r<=0;"""";ЕСЛИ(M$r<1;12;ЕСЛИ(M$r<5;16;20)))"';
       final colP = '';
-      final colQ = '=IF(O$r<>"";ROUND(M$r*O$r;1);"")';
-      final colR = (i == 0) ? '=IF(COUNT(Q$startRow:Q$endRow)>0;ROUND(AVERAGE(Q$startRow:Q$endRow);1);"")' : '';
+      final colQ = '"=ЕСЛИ(O$r<>"""";ОКРУГЛ(M$r*O$r;1);"""")"';
+      final colR = (i == 0) ? '"=ЕСЛИ(СЧЁТ(Q$startRow:Q$endRow)>0;ОКРУГЛ(СРЗНАЧ(Q$startRow:Q$endRow);1);"""")"' : '';
 
       sb.writeln('$colA;$colB;$colC;$colD;$colE;$colF;$colG;$colH;$colI;$colJ;$colK;$colL;$colM;$colN;$colO;$colP;$colQ;$colR');
     }
@@ -113,10 +140,18 @@ class ExportService {
     final filename = 'Результаты_испытаний_${safeId}.csv';
     final savedFile = await _writeCsvFile(filename: filename, content: sb.toString());
 
-    await Share.shareXFiles(
-      [XFile(savedFile.path)],
-      subject: 'Результаты_испытаний_${safeId}',
-      text: 'Протокол результатов испытаний ГОСТ 24941-81',
-    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF059669),
+          content: Text('Файл сохранен в Загрузки:\n${savedFile.path}'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+
+    if (shareImmediately) {
+      await Share.shareXFiles([XFile(savedFile.path)], text: 'Результаты испытаний $seriesId');
+    }
   }
 }
