@@ -35,7 +35,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   bool _isA4CalibMode = false;
   bool _isLassoMode = false;
   bool _isEraserMode = false;
-  double _eraserRadius = 24.0;
+  double _eraserRadius = 16.0;
 
   final List<Offset> _lassoPoints = [];
   final List<Offset> _eraserStroke = [];
@@ -80,10 +80,14 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
   }
 
-  Future<bool> _confirmExit() async {
-    if (_polygons.isEmpty) return true;
+  // Гарантированный диалог выхода
+  Future<void> _requestExit() async {
+    if (_polygons.isEmpty) {
+      Navigator.of(context).pop();
+      return;
+    }
 
-    final bool? result = await showDialog<bool>(
+    final bool? shouldExit = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext ctx) {
@@ -124,7 +128,9 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       },
     );
 
-    return result ?? false;
+    if (shouldExit == true && mounted) {
+      Navigator.of(context).pop();
+    }
   }
 
   void _saveToHistory() {
@@ -163,14 +169,82 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     return Offset(local.dx.clamp(0.0, box.size.width), local.dy.clamp(0.0, box.size.height));
   }
 
+  // Алгоритм поиска пересечения отрезков AB и CD
+  Offset? _findIntersection(Offset p1, Offset p2, Offset p3, Offset p4) {
+    final double d = (p2.dx - p1.dx) * (p4.dy - p3.dy) - (p2.dy - p1.dy) * (p4.dx - p3.dx);
+    if (d.abs() < 1e-9) return null;
+
+    final double u = ((p3.dx - p1.dx) * (p4.dy - p3.dy) - (p3.dy - p1.dy) * (p4.dx - p3.dx)) / d;
+    final double v = ((p3.dx - p1.dx) * (p2.dy - p1.dy) - (p3.dy - p1.dy) * (p2.dx - p1.dx)) / d;
+
+    if (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0) {
+      return Offset(p1.dx + u * (p2.dx - p1.dx), p1.dy + u * (p2.dy - p1.dy));
+    }
+    return null;
+  }
+
+  // Мягкий хирургический срез выпирающего луча ластиком
   void _applyEraserCut() {
     if (_eraserStroke.length < 2 || _activePolygonIndex == -1) return;
     final poly = _polygons[_activePolygonIndex];
     if (poly.points.length < 4) return;
 
-    _saveToHistory();
+    final Offset cutStart = _eraserStroke.first;
+    final Offset cutEnd = _eraserStroke.last;
 
-    final List<Offset> updated = [];
+    int edge1 = -1;
+    Offset? inter1;
+    int edge2 = -1;
+    Offset? inter2;
+
+    // Ищем пересечения линии среза ластика с рёбрами полигона
+    for (int i = 0; i < poly.points.length; i++) {
+      final pA = poly.points[i];
+      final pB = poly.points[(i + 1) % poly.points.length];
+      final inter = _findIntersection(cutStart, cutEnd, pA, pB);
+
+      if (inter != null) {
+        if (edge1 == -1) {
+          edge1 = i;
+          inter1 = inter;
+        } else if (edge2 == -1 && i != edge1) {
+          edge2 = i;
+          inter2 = inter;
+          break;
+        }
+      }
+    }
+
+    if (inter1 != null && inter2 != null && edge1 != -1 && edge2 != -1) {
+      _saveToHistory();
+
+      final List<Offset> opt1 = [];
+      opt1.add(inter1);
+      for (int i = (edge1 + 1) % poly.points.length; i != (edge2 + 1) % poly.points.length; i = (i + 1) % poly.points.length) {
+        opt1.add(poly.points[i]);
+      }
+      opt1.add(inter2);
+
+      final List<Offset> opt2 = [];
+      opt2.add(inter2);
+      for (int i = (edge2 + 1) % poly.points.length; i != (edge1 + 1) % poly.points.length; i = (i + 1) % poly.points.length) {
+        opt2.add(poly.points[i]);
+      }
+      opt2.add(inter1);
+
+      // Оставляем большую часть тела керна (отсекаем только меньший срезанный луч)
+      final area1 = PolygonMath.computeShoelaceArea(opt1);
+      final area2 = PolygonMath.computeShoelaceArea(opt2);
+
+      setState(() {
+        poly.points = (area1 >= area2) ? opt1 : opt2;
+      });
+      return;
+    }
+
+    // Если прямого пересечения отрезком не случилось — аккуратно удаляем только вершины в круге радиуса ластика
+    _saveToHistory();
+    final List<Offset> fallback = [];
     for (final pt in poly.points) {
       bool hit = false;
       for (final ePt in _eraserStroke) {
@@ -179,12 +253,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
           break;
         }
       }
-      if (!hit) updated.add(pt);
+      if (!hit) fallback.add(pt);
     }
 
-    if (updated.length >= 3) {
+    if (fallback.length >= 3) {
       setState(() {
-        poly.points = updated;
+        poly.points = fallback;
       });
     }
   }
@@ -493,12 +567,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
 
     return PopScope(
-      canPop: _polygons.isEmpty,
-      onPopInvokedWithResult: (bool didPop, dynamic result) async {
-        if (didPop) return;
-        final bool shouldLeave = await _confirmExit();
-        if (shouldLeave && context.mounted) {
-          Navigator.of(context).pop();
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop) {
+          _requestExit();
         }
       },
       child: Scaffold(
@@ -509,12 +581,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
           elevation: 0.5,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: Color(0xFF0F172A)),
-            onPressed: () async {
-              final bool shouldLeave = await _confirmExit();
-              if (shouldLeave && context.mounted) {
-                Navigator.of(context).pop();
-              }
-            },
+            onPressed: _requestExit,
           ),
           actions: [
             IconButton(
@@ -651,6 +718,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
+                      // Лупа HUD
                       if (_targetNodeLocal != null && _decodedImage != null)
                         Positioned(
                           top: 14,
@@ -681,40 +749,43 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
+                      // Панель настройки ластика
                       if (_isEraserMode)
                         Positioned(
                           bottom: 74,
-                          left: 32,
-                          right: 32,
+                          left: 20,
+                          right: 20,
                           child: Center(
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.95),
+                                color: Colors.white.withOpacity(0.96),
                                 borderRadius: BorderRadius.circular(24),
                                 boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2))],
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.circle, size: 12, color: Color(0xFFDC2626)),
+                                  const Icon(Icons.content_cut, size: 14, color: Color(0xFFDC2626)),
+                                  const SizedBox(width: 4),
                                   SizedBox(
-                                    width: 150,
+                                    width: 140,
                                     child: Slider(
                                       value: _eraserRadius,
-                                      min: 8.0,
-                                      max: 50.0,
+                                      min: 6.0,
+                                      max: 45.0,
                                       activeColor: const Color(0xFFDC2626),
                                       onChanged: (val) => setState(() => _eraserRadius = val),
                                     ),
                                   ),
-                                  Text('${_eraserRadius.toStringAsFixed(0)}px', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                                  Text('${_eraserRadius.toStringAsFixed(0)} px', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                                 ],
                               ),
                             ),
                           ),
                         ),
 
+                      // Нижняя панель инструментов
                       Positioned(
                         bottom: 12,
                         left: 12,
@@ -919,18 +990,26 @@ class _CleanPolygonPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Линия ластика среза (яркий пунктирный или четкий разрез)
     if (eraserStroke.length > 1) {
-      final eraserPaint = Paint()
-        ..color = const Color(0xFFDC2626).withOpacity(0.5)
+      final eraserLinePaint = Paint()
+        ..color = const Color(0xFFDC2626)
+        ..strokeWidth = 3.0
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
+
+      final eraserAuraPaint = Paint()
+        ..color = const Color(0xFFDC2626).withOpacity(0.2)
         ..strokeWidth = eraserRadius * 2
         ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
+
       final ePath = Path()..moveTo(eraserStroke.first.dx, eraserStroke.first.dy);
       for (int i = 1; i < eraserStroke.length; i++) {
         ePath.lineTo(eraserStroke[i].dx, eraserStroke[i].dy);
       }
-      canvas.drawPath(ePath, eraserPaint);
+      canvas.drawPath(ePath, eraserAuraPaint);
+      canvas.drawPath(ePath, eraserLinePaint);
     }
 
     if (lassoPoints.length > 1) {
