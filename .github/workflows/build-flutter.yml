@@ -29,19 +29,23 @@ jobs:
       - name: Generate Android project structure
         run: flutter create . --project-name rockarea --org com.rockarea --platforms android
 
-      - name: Configure Android SDK and Desktop Icon
+      - name: Configure Android Permissions and Desktop Icon
         run: |
-          # 1. Повышаем compileSdk и targetSdk до 35
+          # 1. Повышаем compileSdk
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle || true
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' android/app/build.gradle || true
 
-          # 2. Имя приложения с заглавных букв
+          # 2. Имя приложения с большой буквы
           sed -i 's/android:label="rockarea"/android:label="RockArea"/g' android/app/src/main/AndroidManifest.xml
 
-          # 3. Удаляем старые картинки робота
+          # 3. Разрешения на сохранение файлов в память
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<application android:requestLegacyExternalStorage="true"/g' android/app/src/main/AndroidManifest.xml
+
+          # 4. Удаляем старые картинки робота
           find android/app/src/main/res/ -name "ic_launcher*.png" -delete
 
-          # 4. Цвет фона (#0F172A)
+          # 5. Цвет фона (#0F172A)
           mkdir -p android/app/src/main/res/values
           cat << 'EOF' > android/app/src/main/res/values/colors.xml
           <?xml version="1.0" encoding="utf-8"?>
@@ -50,7 +54,7 @@ jobs:
           </resources>
           EOF
 
-          # 5. Векторный передний план
+          # 6. Векторный передний план
           mkdir -p android/app/src/main/res/drawable
           cat << 'EOF' > android/app/src/main/res/drawable/ic_launcher_foreground.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -99,7 +103,7 @@ jobs:
           </vector>
           EOF
 
-          # 6. Адаптивная иконка
+          # 7. Адаптивная иконка
           mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           cat << 'EOF' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           <?xml version="1.0" encoding="utf-8"?>
