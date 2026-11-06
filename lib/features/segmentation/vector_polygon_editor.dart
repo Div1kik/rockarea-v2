@@ -137,7 +137,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     return Offset(local.dx.clamp(0.0, box.size.width), local.dy.clamp(0.0, box.size.height));
   }
 
-  // Обрезка выпирающих лучей ластиком
+  // Обрезка выпирающих лучей ластиком со стягиванием контура
   void _applyEraserCut() {
     if (_eraserStroke.length < 2 || _activePolygonIndex == -1) return;
     final poly = _polygons[_activePolygonIndex];
@@ -145,7 +145,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
     _saveToHistory();
 
-    // Удаляем из активного контура вершины, попавшие под мазок ластика
     final List<Offset> updated = [];
     for (final pt in poly.points) {
       bool hit = false;
@@ -163,51 +162,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
         poly.points = updated;
       });
     }
-  }
-
-  void _showEraserSettings() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Диаметр срезающего ластика', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: _eraserRadius * 2,
-                    height: _eraserRadius * 2,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFDC2626).withOpacity(0.2),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFFDC2626), width: 2),
-                    ),
-                  ),
-                ],
-              ),
-              Slider(
-                value: _eraserRadius,
-                min: 10.0,
-                max: 60.0,
-                activeColor: const Color(0xFFDC2626),
-                onChanged: (val) {
-                  setSheetState(() => _eraserRadius = val);
-                  setState(() => _eraserRadius = val);
-                },
-              ),
-              Text('${_eraserRadius.toStringAsFixed(0)} px', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   void _onPointerDown(PointerDownEvent e) {
@@ -311,7 +265,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       setState(() {
         if (_lassoPoints.isEmpty || (_lassoPoints.last - localPos).distance > 4.0) {
           _lassoPoints.add(localPos);
-          _targetNodeLocal = localPos; // Активирует лупу во время лассо
+          _targetNodeLocal = localPos;
         }
       });
       return;
@@ -346,7 +300,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       _applyEraserCut();
       setState(() {
         _eraserStroke.clear();
-        _isEraserMode = false;
       });
       return;
     }
@@ -354,7 +307,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     if (_isLassoMode && _lassoPoints.length > 5) {
       final int nextNum = _polygons.length + 1;
       setState(() {
-        _polygons.add(SamplePolygon(id: 'БАМ 1 $nextNum', points: List<Offset>.from(_lassoPoints)));
+        _polygons.add(SamplePolygon(id: 'АБВ 1 1 $nextNum', points: List<Offset>.from(_lassoPoints)));
         _activePolygonIndex = _polygons.length - 1;
         _lassoPoints.clear();
         _isLassoMode = false;
@@ -413,7 +366,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       final int nextNum = _polygons.length + 1;
       final points = detectedNormPoints.map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height)).toList();
 
-      _polygons.add(SamplePolygon(id: 'БАМ 1 $nextNum', points: points));
+      _polygons.add(SamplePolygon(id: 'АБВ 1 1 $nextNum', points: points));
       _activePolygonIndex = _polygons.length - 1;
       _activePointIndex = -1;
     });
@@ -428,9 +381,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       final existing = _strengthDataMap[i];
 
       items.add(SampleStrengthData(
-        part1: existing?.part1 ?? (raw.isNotEmpty ? raw[0] : 'БАМ'),
+        part1: existing?.part1 ?? (raw.isNotEmpty ? raw[0] : 'АБВ'),
         part2: existing?.part2 ?? (raw.length > 1 ? raw[1] : '1'),
-        part3: existing?.part3 ?? (raw.length > 2 ? raw[2] : '${i + 1}'),
+        part3: existing?.part3 ?? (raw.length > 2 ? raw[2] : '1'),
+        part4: existing?.part4 ?? (raw.length > 3 ? raw[3] : '${i + 1}'),
         areaCm2: area,
         loadKn: existing?.loadKn ?? 0.0,
         condition: existing?.condition ?? 'n',
@@ -441,12 +395,12 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       context,
       MaterialPageRoute(
         builder: (_) => StrengthCalculatorSheet(
-          title: 'Расчёт нагрузки',
+          title: 'Результаты испытаний',
           initialSamples: items,
           onSaved: (updated) {
             for (int i = 0; i < updated.length; i++) {
               _strengthDataMap[i] = updated[i];
-              _polygons[i].id = '${updated[i].part1} ${updated[i].part2} ${updated[i].part3}';
+              _polygons[i].id = '${updated[i].part1} ${updated[i].part2} ${updated[i].part3} ${updated[i].part4}';
             }
             setState(() {});
           },
@@ -495,7 +449,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(backgroundColor: Color(0xFF2563EB), content: Text('Серия испытаний сохранена в журнал!')),
+        const SnackBar(backgroundColor: Color(0xFF2563EB), content: Text('Серия сохранена в журнал!')),
       );
       Navigator.pop(context);
     }
@@ -669,7 +623,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
-                      // Лупа (работает как при перетягивании точек, так и при рисовании Лассо)
+                      // Лупа
                       if (_targetNodeLocal != null && _decodedImage != null)
                         Positioned(
                           top: 14,
@@ -700,64 +654,98 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                           ),
                         ),
 
-                      // Панель инструментов
+                      // Ползунок размера ластика
+                      if (_isEraserMode)
+                        Positioned(
+                          bottom: 74,
+                          left: 32,
+                          right: 32,
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2))],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.circle, size: 12, color: Color(0xFFDC2626)),
+                                  SizedBox(
+                                    width: 150,
+                                    child: Slider(
+                                      value: _eraserRadius,
+                                      min: 8.0,
+                                      max: 50.0,
+                                      activeColor: const Color(0xFFDC2626),
+                                      onChanged: (val) => setState(() => _eraserRadius = val),
+                                    ),
+                                  ),
+                                  Text('${_eraserRadius.toStringAsFixed(0)}px', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // Компактная панель инструментов (без переполнения)
                       Positioned(
                         bottom: 12,
-                        left: 16,
-                        right: 16,
+                        left: 12,
+                        right: 12,
                         child: Center(
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.95),
+                              color: Colors.white.withOpacity(0.96),
                               borderRadius: BorderRadius.circular(30),
                               boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 3))],
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                TextButton.icon(
-                                  onPressed: () => setState(() {
-                                    _isA4CalibMode = !_isA4CalibMode;
-                                    _isLassoMode = false;
-                                    _isEraserMode = false;
-                                    _activePointIndex = -1;
-                                  }),
-                                  icon: Icon(Icons.crop_free, size: 16, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF475569)),
-                                  label: Text(_isA4CalibMode ? 'Готово' : 'Калибровка А4',
-                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF475569))),
-                                ),
-                                Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
-                                IconButton(
-                                  icon: Icon(Icons.gesture, size: 18, color: _isLassoMode ? const Color(0xFFF97316) : const Color(0xFF475569)),
-                                  tooltip: 'Лассо',
-                                  onPressed: () => setState(() {
-                                    _isLassoMode = !_isLassoMode;
-                                    _isA4CalibMode = false;
-                                    _isEraserMode = false;
-                                  }),
-                                ),
-                                Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
-                                // Ластик (короткий тап — режим срезки луча, долгий тап — выбор размера)
-                                GestureDetector(
-                                  onLongPress: _showEraserSettings,
-                                  child: IconButton(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextButton.icon(
+                                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                    onPressed: () => setState(() {
+                                      _isA4CalibMode = !_isA4CalibMode;
+                                      _isLassoMode = false;
+                                      _isEraserMode = false;
+                                      _activePointIndex = -1;
+                                    }),
+                                    icon: Icon(Icons.crop_free, size: 16, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF475569)),
+                                    label: Text(_isA4CalibMode ? 'Готово' : 'А4',
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _isA4CalibMode ? const Color(0xFF2563EB) : const Color(0xFF475569))),
+                                  ),
+                                  Container(width: 1, height: 16, color: const Color(0xFFE2E8F0)),
+                                  IconButton(
+                                    icon: Icon(Icons.gesture, size: 18, color: _isLassoMode ? const Color(0xFFF97316) : const Color(0xFF475569)),
+                                    tooltip: 'Лассо',
+                                    onPressed: () => setState(() {
+                                      _isLassoMode = !_isLassoMode;
+                                      _isA4CalibMode = false;
+                                      _isEraserMode = false;
+                                    }),
+                                  ),
+                                  IconButton(
                                     icon: Icon(Icons.auto_fix_high, size: 18, color: _isEraserMode ? const Color(0xFFDC2626) : const Color(0xFF475569)),
-                                    tooltip: 'Ластик (Зажмите для размера)',
+                                    tooltip: 'Ластик среза лучей',
                                     onPressed: () => setState(() {
                                       _isEraserMode = !_isEraserMode;
                                       _isLassoMode = false;
                                       _isA4CalibMode = false;
                                     }),
                                   ),
-                                ),
-                                Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
-                                TextButton.icon(
-                                  onPressed: _polygons.isNotEmpty ? _openStrengthCalculator : null,
-                                  icon: const Icon(Icons.calculate_outlined, size: 16, color: Color(0xFF2563EB)),
-                                  label: const Text('Расчёт нагрузки', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                                ),
-                              ],
+                                  Container(width: 1, height: 16, color: const Color(0xFFE2E8F0)),
+                                  IconButton(
+                                    icon: const Icon(Icons.calculate_outlined, size: 20, color: Color(0xFF2563EB)),
+                                    tooltip: 'Результаты испытаний',
+                                    onPressed: _polygons.isNotEmpty ? _openStrengthCalculator : null,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -769,7 +757,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                   ),
                 ),
 
-                // Нижний блок со списком
                 Container(
                   height: 200,
                   decoration: const BoxDecoration(
@@ -907,10 +894,9 @@ class _CleanPolygonPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Отрисовка траектории ластика
     if (eraserStroke.length > 1) {
       final eraserPaint = Paint()
-        ..color = const Color(0xFFDC2626).withOpacity(0.4)
+        ..color = const Color(0xFFDC2626).withOpacity(0.5)
         ..strokeWidth = eraserRadius * 2
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
