@@ -7,7 +7,6 @@ import 'archive_service.dart';
 import '../features/strength/strength_calculator_sheet.dart';
 
 class ExportService {
-  /// Прямая запись CSV в системную папку Загрузки телефона
   static Future<File> _writeCsvFile({
     required String filename,
     required String content,
@@ -26,7 +25,7 @@ class ExportService {
     targetDir ??= await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
 
     final file = File('${targetDir.path}/$filename');
-    // UTF-8 BOM для безупречного распознавания кириллицы
+    // Маркер UTF-8 BOM для корректного открытия кириллицы
     final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
     await file.writeAsBytes(bytes, flush: true);
     return file;
@@ -68,7 +67,7 @@ class ExportService {
     }
   }
 
-  /// 2. Результаты испытаний ГОСТ 24941-81 с работающими русскими формулами Excel
+  /// 2. Результаты испытаний ГОСТ 24941-81 с вертикальной шапкой и формулами
   static Future<void> exportGostProtocol({
     required BuildContext context,
     required String seriesId,
@@ -79,26 +78,26 @@ class ExportService {
   }) async {
     final sb = StringBuffer();
 
-    // Шапка таблицы (строго 18 столбцов: A - R)
+    // 1-я строка: Вертикальная компактная шапка с переносами строк \n
     sb.writeln(
       '№;'
-      'Шифр пробы;;;'
-      '№ Скважины;'
-      'Интервал, м;'
+      '"Шифр\nпробы";;;'
+      '"№ Сква-\nжины";'
+      '"Интер-\nвал, м";'
       'Состояние;'
-      'Литологический тип;;'
-      'Площадь скола, см2;'
-      'Разрушающая нагрузка, кН;'
+      '"Литологический\nтип";;'
+      '"Площадь\nскола,\nсм2";'
+      '"Разрушающая\nнагрузка,\nкН";'
       'K;'
-      'Предел прочности на растяжение, МПа;'
-      'Среднее значение предела прочности на растяжение, МПа;'
-      'Коэф. Пересчета;'
-      'Шифр Коэф. Пересчета;'
-      'Предел прочности на сжатие (расчетным методом по ГОСТ 24941-81), МПа;'
-      'Среднее значение предела прочности на сжатие (расчетным методом по ГОСТ 24941-81), МПа'
+      '"Предел прочности\nна растяжение,\nМПа";'
+      '"Среднее значение\nпредела прочности\nна растяжение, МПа";'
+      '"Коэф.\nПересчета";'
+      '"Шифр Коэф.\nПересчета";'
+      '"Предел прочности на сжатие\n(расчетным методом по\nГОСТ 24941-81), МПа";'
+      '"Среднее значение предела\nпрочности на сжатие\n(расчетным методом по\nГОСТ 24941-81), МПа"'
     );
 
-    // Номера граф по ГОСТ
+    // 2-я строка: Номера граф по ГОСТ
     sb.writeln('1;2;;;3;4;5;6;;7;8;9;10;11;;;12;13');
 
     final int startRow = 3;
@@ -118,20 +117,21 @@ class ExportService {
       final colH = s.lithology;
       final colI = '';
 
-      // Числовые значения через запятую (для распознавания русским Excel)
+      // Числа в таблице выводятся с запятой для корректного отображения
       final colJ = s.areaCm2 > 0 ? s.areaCm2.toStringAsFixed(2).replaceAll('.', ',') : '0,00';
       final colK = s.loadKn > 0 ? s.loadKn.toStringAsFixed(2).replaceAll('.', ',') : '0,00';
 
-      // 100% валидные формулы для русского Excel в CSV:
-      // Все формулы заключены в кавычки "", числа записаны через запятую (0,5076 и 0,2506),
-      // а функции названы на русском (ОКРУГЛ, ЕСЛИ, СРЗНАЧ).
-      final colL = '"=ОКРУГЛ(0,5076*(J$r^0,2506);2)"';
-      final colM = '"=ЕСЛИ(J$r>0;ОКРУГЛ((7,5*K$r*L$r)/J$r;2);0)"';
-      final colN = (i == 0) ? '"=ОКРУГЛ(СРЗНАЧ(M$startRow:M$endRow);2)"' : '';
-      final colO = '"=ЕСЛИ(M$r<=0;"""";ЕСЛИ(M$r<1;12;ЕСЛИ(M$r<5;16;20)))"';
+      // 100% совместимые формулы для Google Таблиц и Excel:
+      // Имена функций стандартные латинские (ROUND, IF, AVERAGE, COUNT),
+      // числа в формулах с точкой (0.5076, 0.2506), аргументы разделены точкой с запятой (;),
+      // вся формула обернута в кавычки.
+      final colL = '"=ROUND(0.5076*(J$r^0.2506); 2)"';
+      final colM = '"=IF(J$r>0; ROUND((7.5*K$r*L$r)/J$r; 2); 0)"';
+      final colN = (i == 0) ? '"=ROUND(AVERAGE(M$startRow:M$endRow); 2)"' : '';
+      final colO = '"=IF(M$r<=0; """"; IF(M$r<1; 12; IF(M$r<5; 16; 20)))"';
       final colP = '';
-      final colQ = '"=ЕСЛИ(O$r<>"""";ОКРУГЛ(M$r*O$r;1);"""")"';
-      final colR = (i == 0) ? '"=ЕСЛИ(СЧЁТ(Q$startRow:Q$endRow)>0;ОКРУГЛ(СРЗНАЧ(Q$startRow:Q$endRow);1);"""")"' : '';
+      final colQ = '"=IF(O$r<>""""; ROUND(M$r*O$r; 1); """")"';
+      final colR = (i == 0) ? '"=IF(COUNT(Q$startRow:Q$endRow)>0; ROUND(AVERAGE(Q$startRow:Q$endRow); 1); """")"' : '';
 
       sb.writeln('$colA;$colB;$colC;$colD;$colE;$colF;$colG;$colH;$colI;$colJ;$colK;$colL;$colM;$colN;$colO;$colP;$colQ;$colR');
     }
