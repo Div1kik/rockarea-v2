@@ -76,7 +76,6 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
 
   void _editSample(int index) {
     final s = _samples[index];
-    // Поля ввода шифра пробы по умолчанию пустые
     final p1Ctrl = TextEditingController(text: s.part1);
     final p2Ctrl = TextEditingController(text: s.part2);
     final p3Ctrl = TextEditingController(text: s.part3);
@@ -88,6 +87,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text('Образец #${index + 1}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
@@ -98,11 +98,11 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    Expanded(child: TextField(controller: p1Ctrl, decoration: const InputDecoration(hintText: 'Шифр 1', isDense: true, border: OutlineInputBorder()))),
+                    Expanded(child: TextField(controller: p1Ctrl, decoration: const InputDecoration(hintText: 'БАМ', hintStyle: TextStyle(color: Color(0xFF94A3B8)), isDense: true, border: OutlineInputBorder()))),
                     const SizedBox(width: 4),
-                    Expanded(child: TextField(controller: p2Ctrl, decoration: const InputDecoration(hintText: 'Шифр 2', isDense: true, border: OutlineInputBorder()))),
+                    Expanded(child: TextField(controller: p2Ctrl, decoration: const InputDecoration(hintText: '1', hintStyle: TextStyle(color: Color(0xFF94A3B8)), isDense: true, border: OutlineInputBorder()))),
                     const SizedBox(width: 4),
-                    Expanded(child: TextField(controller: p3Ctrl, decoration: const InputDecoration(hintText: 'Шифр 3', isDense: true, border: OutlineInputBorder()))),
+                    Expanded(child: TextField(controller: p3Ctrl, decoration: const InputDecoration(hintText: '1', hintStyle: TextStyle(color: Color(0xFF94A3B8)), isDense: true, border: OutlineInputBorder()))),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -116,6 +116,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     hintText: '0.00',
+                    hintStyle: TextStyle(color: Color(0xFF94A3B8)),
                     border: OutlineInputBorder(),
                     contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
@@ -178,7 +179,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               samples: _samples,
               avgTensile: _avgTensile,
               avgComp: _avgComp,
-              shareImmediately: false,
+              shareImmediately: true,
             ),
           ),
           ElevatedButton(
@@ -257,7 +258,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                     ],
                   ),
                   subtitle: Text(
-                    'S = ${s.areaCm2.toStringAsFixed(2)} см² | P = ${s.loadKn > 0 ? '${s.loadKn} кН' : '0.00'}',
+                    'S = ${s.areaCm2.toStringAsFixed(2)} см² | P = ${s.loadKn > 0 ? '${s.loadKn} кН' : 'не задана'}',
                     style: TextStyle(fontSize: 11, color: s.loadKn > 0 ? const Color(0xFF64748B) : const Color(0xFFDC2626)),
                   ),
                   trailing: Column(
@@ -265,7 +266,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text('Rc: ${s.compStrengthMpa.toStringAsFixed(1)} МПа', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
-                      const Text('Ввести P', style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
+                      const Text('Изменить', style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
                     ],
                   ),
                 );
