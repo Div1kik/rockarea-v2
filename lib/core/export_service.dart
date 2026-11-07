@@ -7,25 +7,16 @@ import 'archive_service.dart';
 import '../features/strength/strength_calculator_sheet.dart';
 
 class ExportService {
-  /// Мгновенная запись CSV без блокирующих таймаутов Android FUSE
+  /// Мгновенная запись CSV в локальную директорию без таймаутов FUSE
   static Future<File> _writeCsvFile({
     required String filename,
     required String content,
   }) async {
-    File file;
-    try {
-      final downloadDir = Directory('/storage/emulated/0/Download');
-      file = File('${downloadDir.path}/$filename');
-      final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
-      await file.writeAsBytes(bytes, flush: false);
-      return file;
-    } catch (_) {
-      final appDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-      file = File('${appDir.path}/$filename');
-      final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
-      await file.writeAsBytes(bytes, flush: false);
-      return file;
-    }
+    final Directory baseDir = await getApplicationDocumentsDirectory();
+    final File file = File('${baseDir.path}/$filename');
+    final List<int> bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
+    await file.writeAsBytes(bytes, flush: false);
+    return file;
   }
 
   /// 1. Ведомость «Площади»
@@ -34,7 +25,7 @@ class ExportService {
     required TestRecord record,
     bool shareImmediately = false,
   }) async {
-    final sb = StringBuffer();
+    final StringBuffer sb = StringBuffer();
     sb.writeln('ВЕДОМОСТЬ ПЛОЩАДЕЙ ОБРАЗЦОВ');
     sb.writeln('Серия;${record.id};Дата;${record.date}');
     sb.writeln('');
@@ -45,16 +36,16 @@ class ExportService {
       sb.writeln('${i + 1};${s.name};${s.areaCm2.toStringAsFixed(2)}');
     }
 
-    final safeId = record.id.replaceAll(RegExp(r'[^\w\d]'), '_');
-    final filename = 'Площади_${safeId}.csv';
-    final savedFile = await _writeCsvFile(filename: filename, content: sb.toString());
+    final String safeId = record.id.replaceAll(RegExp(r'[^\w\d]'), '_');
+    final String filename = 'Площади_${safeId}.csv';
+    final File savedFile = await _writeCsvFile(filename: filename, content: sb.toString());
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF2563EB),
-          content: Text('Файл мгновенно сохранен:\n${savedFile.path}'),
-          duration: const Duration(seconds: 3),
+          content: Text('Файл сформирован:\n$filename'),
+          duration: const Duration(seconds: 4),
           action: SnackBarAction(
             label: 'Отправить',
             textColor: Colors.white,
@@ -69,7 +60,7 @@ class ExportService {
     }
   }
 
-  /// 2. Результаты испытаний ГОСТ 24941-81 с чистой многострочной шапкой (без дефисов)
+  /// 2. Результаты испытаний ГОСТ 24941-81
   static Future<void> exportGostProtocol({
     required BuildContext context,
     required String seriesId,
@@ -78,9 +69,9 @@ class ExportService {
     required double avgComp,
     bool shareImmediately = false,
   }) async {
-    final sb = StringBuffer();
+    final StringBuffer sb = StringBuffer();
 
-    // 1-я строка: Высокая шапка с цельными словами (без дефисов)
+    // 1-я строка: Чистая высокая шапка без дефисов
     sb.writeln(
       '№;'
       '"Шифр\nпробы";;;'
@@ -107,7 +98,7 @@ class ExportService {
 
     for (int i = 0; i < samples.length; i++) {
       final s = samples[i];
-      final r = startRow + i;
+      final int r = startRow + i;
 
       final colA = '${i + 1}';
       final colB = s.part1;
@@ -119,7 +110,6 @@ class ExportService {
       final colH = s.lithology;
       final colI = '';
 
-      // Числовые значения через точку для моментального распознавания Таблицами
       final colJ = s.areaCm2 > 0 ? s.areaCm2.toStringAsFixed(2) : '0.00';
       final colK = s.loadKn > 0 ? s.loadKn.toStringAsFixed(2) : '0.00';
 
@@ -134,15 +124,15 @@ class ExportService {
       sb.writeln('$colA;$colB;$colC;$colD;$colE;$colF;$colG;$colH;$colI;$colJ;$colK;$colL;$colM;$colN;$colO;$colP;$colQ;$colR');
     }
 
-    final safeId = seriesId.replaceAll(RegExp(r'[^\w\d]'), '_');
-    final filename = 'Результаты_испытаний_${safeId}.csv';
-    final savedFile = await _writeCsvFile(filename: filename, content: sb.toString());
+    final String safeId = seriesId.replaceAll(RegExp(r'[^\w\d]'), '_');
+    final String filename = 'Результаты_испытаний_${safeId}.csv';
+    final File savedFile = await _writeCsvFile(filename: filename, content: sb.toString());
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF059669),
-          content: Text('Файл мгновенно сохранен:\n${savedFile.path}'),
+          content: Text('Файл сформирован:\n$filename'),
           duration: const Duration(seconds: 4),
           action: SnackBarAction(
             label: 'Отправить',
