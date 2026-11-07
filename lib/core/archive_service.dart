@@ -1,14 +1,15 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class SampleItem {
-  String name;
-  double areaPx;
-  double areaCm2;
-  double loadKn;
-  String condition;
-  double tensileMpa;
-  double compMpa;
+  final String name;
+  final double areaPx;
+  final double areaCm2;
+  final double loadKn;
+  final String condition;
+  final double tensileMpa;
+  final double compMpa;
 
   SampleItem({
     required this.name,
@@ -30,14 +31,14 @@ class SampleItem {
         'compMpa': compMpa,
       };
 
-  factory SampleItem.fromJson(Map<String, dynamic> j) => SampleItem(
-        name: j['name'] ?? '',
-        areaPx: (j['areaPx'] as num?)?.toDouble() ?? 0.0,
-        areaCm2: (j['areaCm2'] as num?)?.toDouble() ?? 0.0,
-        loadKn: (j['loadKn'] as num?)?.toDouble() ?? 0.0,
-        condition: j['condition'] ?? 'n',
-        tensileMpa: (j['tensileMpa'] as num?)?.toDouble() ?? 0.0,
-        compMpa: (j['compMpa'] as num?)?.toDouble() ?? 0.0,
+  factory SampleItem.fromJson(Map<String, dynamic> json) => SampleItem(
+        name: json['name'] as String? ?? 'Образец',
+        areaPx: (json['areaPx'] as num?)?.toDouble() ?? 0.0,
+        areaCm2: (json['areaCm2'] as num?)?.toDouble() ?? 0.0,
+        loadKn: (json['loadKn'] as num?)?.toDouble() ?? 0.0,
+        condition: json['condition'] as String? ?? 'n',
+        tensileMpa: (json['tensileMpa'] as num?)?.toDouble() ?? 0.0,
+        compMpa: (json['compMpa'] as num?)?.toDouble() ?? 0.0,
       );
 }
 
@@ -46,7 +47,7 @@ class TestRecord {
   final String date;
   final String imagePath;
   final double totalAreaCm2;
-  List<SampleItem> samples;
+  final List<SampleItem> samples;
 
   TestRecord({
     required this.id,
@@ -64,50 +65,60 @@ class TestRecord {
         'samples': samples.map((s) => s.toJson()).toList(),
       };
 
-  factory TestRecord.fromJson(Map<String, dynamic> j) => TestRecord(
-        id: j['id'] ?? '',
-        date: j['date'] ?? '',
-        imagePath: j['imagePath'] ?? '',
-        totalAreaCm2: (j['totalAreaCm2'] as num?)?.toDouble() ?? 0.0,
-        samples: (j['samples'] as List? ?? [])
+  factory TestRecord.fromJson(Map<String, dynamic> json) => TestRecord(
+        id: json['id'] as String? ?? 'Серия',
+        date: json['date'] as String? ?? '',
+        imagePath: json['imagePath'] as String? ?? '',
+        totalAreaCm2: (json['totalAreaCm2'] as num?)?.toDouble() ?? 0.0,
+        samples: (json['samples'] as List<dynamic>? ?? [])
             .map((e) => SampleItem.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }
 
 class ArchiveService {
-  static const String _kKey = 'rockarea_records_v2';
+  static const String _fileName = 'archive_records.json';
+
+  static Future<File> _getFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/$_fileName');
+  }
+
+  /// Возвращает все сохранённые серии (для совместимости поддерживаются оба имени)
+  static Future<List<TestRecord>> getRecords() async {
+    return loadRecords();
+  }
 
   static Future<List<TestRecord>> loadRecords() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_kKey) ?? [];
-    return raw.map((s) => TestRecord.fromJson(jsonDecode(s))).toList();
-  }
+    try {
+      final file = await _getFile();
+      if (!await file.exists()) return [];
 
-  static Future<void> saveRecord(TestRecord record) async {
-    final records = await loadRecords();
-    records.insert(0, record);
-    await _writeRecords(records);
-  }
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) return [];
 
-  static Future<void> updateRecord(TestRecord record) async {
-    final records = await loadRecords();
-    final idx = records.indexWhere((r) => r.id == record.id);
-    if (idx != -1) {
-      records[idx] = record;
-      await _writeRecords(records);
+      final List<dynamic> jsonList = jsonDecode(content) as List<dynamic>;
+      return jsonList
+          .map((e) => TestRecord.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
     }
   }
 
-  static Future<void> deleteRecord(String id) async {
-    final records = await loadRecords();
-    records.removeWhere((r) => r.id == id);
-    await _writeRecords(records);
+  /// Сохранение новой серии в журнал
+  static Future<void> saveRecord(TestRecord record) async {
+    final list = await loadRecords();
+    list.insert(0, record);
+    final file = await _getFile();
+    await file.writeAsString(jsonEncode(list.map((e) => e.toJson()).toList()), flush: true);
   }
 
-  static Future<void> _writeRecords(List<TestRecord> records) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = records.map((r) => jsonEncode(r.toJson())).toList();
-    await prefs.setStringList(_kKey, data);
+  /// Удаление серии по идентификатору
+  static Future<void> deleteRecord(String recordId) async {
+    final list = await loadRecords();
+    list.removeWhere((r) => r.id == recordId);
+    final file = await _getFile();
+    await file.writeAsString(jsonEncode(list.map((e) => e.toJson()).toList()), flush: true);
   }
 }
