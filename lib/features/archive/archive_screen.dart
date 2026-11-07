@@ -18,58 +18,75 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadRecords();
   }
 
-  Future<void> _load() async {
+  Future<void> _loadRecords() async {
     setState(() => _isLoading = true);
-    final data = await ArchiveService.loadRecords();
+    final records = await ArchiveService.getRecords();
     setState(() {
-      _records = data;
+      _records = records;
       _isLoading = false;
     });
   }
 
-  void _openStrengthForRecord(TestRecord record) {
-    final List<SampleStrengthData> items = [];
-
-    for (int i = 0; i < record.samples.length; i++) {
-      final s = record.samples[i];
-      final raw = s.name.split(RegExp(r'\s+'));
-
-      items.add(SampleStrengthData(
-        part1: raw.isNotEmpty ? raw[0] : 'БАМ',
-        part2: raw.length > 1 ? raw[1] : '1',
-        part3: raw.length > 2 ? raw[2] : '${i + 1}',
-        areaCm2: s.areaCm2,
-        loadKn: s.loadKn,
-        condition: s.condition,
-      ));
-    }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => StrengthCalculatorSheet(
-          title: 'Расчёт: ${record.id}',
-          initialSamples: items,
-          onSaved: (updated) async {
-            for (int i = 0; i < updated.length; i++) {
-              record.samples[i].name = '${updated[i].part1} ${updated[i].part2} ${updated[i].part3}';
-              record.samples[i].loadKn = updated[i].loadKn;
-              record.samples[i].condition = updated[i].condition;
-              record.samples[i].tensileMpa = updated[i].tensileStrengthMpa;
-              record.samples[i].compMpa = updated[i].compStrengthMpa;
-            }
-            await ArchiveService.updateRecord(record);
-            _load();
-          },
-        ),
-      ),
+  Future<void> _confirmDeleteRecord(TestRecord record) async {
+    final bool? shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 24),
+              SizedBox(width: 8),
+              Text(
+                'Удалить запись?',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A)),
+              ),
+            ],
+          ),
+          content: Text(
+            'Вы действительно хотите удалить "${record.id}" от ${record.date}?\nДанные серии и все образцы будут стёрты.',
+            style: const TextStyle(fontSize: 13, color: Color(0xFF475569)),
+          ),
+          actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Отмена', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Удалить', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
     );
+
+    if (shouldDelete == true) {
+      await ArchiveService.deleteRecord(record.id);
+      await _loadRecords();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF0F172A),
+            content: Text('Серия "${record.id}" удалена из журнала'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
-  void _showRecordExportMenu(TestRecord record) {
+  void _exportRecord(TestRecord record) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -84,45 +101,49 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             const SizedBox(height: 14),
             ListTile(
               leading: const Icon(Icons.table_chart_outlined, color: Color(0xFF2563EB)),
-              title: const Text('Ведомость «Площади»', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Только номера, наименования и площади (см²)', style: TextStyle(fontSize: 11)),
+              title: const Text('Результаты испытаний (ГОСТ 24941-81)', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Полная таблица с формулами Excel', style: TextStyle(fontSize: 12)),
               onTap: () {
                 Navigator.pop(ctx);
-                ExportService.exportGeometryOnly(context: context, record: record, shareImmediately: false);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.calculate_outlined, color: Color(0xFF059669)),
-              title: const Text('Таблица «Расчёт нагрузки»', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Полный протокол с прочностью и формулами', style: TextStyle(fontSize: 11)),
-              onTap: () {
-                Navigator.pop(ctx);
-                final List<SampleStrengthData> items = record.samples.map((s) {
+                final samples = record.samples.map((s) {
                   final raw = s.name.split(RegExp(r'\s+'));
                   return SampleStrengthData(
-                    part1: raw.isNotEmpty ? raw[0] : 'БАМ',
-                    part2: raw.length > 1 ? raw[1] : '1',
-                    part3: raw.length > 2 ? raw[2] : '1',
+                    part1: raw.isNotEmpty ? raw[0] : '',
+                    part2: raw.length > 1 ? raw[1] : '',
+                    part3: raw.length > 2 ? raw[2] : '',
                     areaCm2: s.areaCm2,
                     loadKn: s.loadKn,
                     condition: s.condition,
                   );
                 }).toList();
 
-                final validTensile = items.where((e) => e.tensileStrengthMpa > 0).toList();
-                final avgT = validTensile.isNotEmpty ? validTensile.map((e) => e.tensileStrengthMpa).reduce((a, b) => a + b) / validTensile.length : 0.0;
+                final avgTensile = samples.where((s) => s.tensileStrengthMpa > 0).isEmpty
+                    ? 0.0
+                    : samples.where((s) => s.tensileStrengthMpa > 0).map((s) => s.tensileStrengthMpa).reduce((a, b) => a + b) /
+                        samples.where((s) => s.tensileStrengthMpa > 0).length;
 
-                final validComp = items.where((e) => e.compStrengthMpa > 0).toList();
-                final avgC = validComp.isNotEmpty ? validComp.map((e) => e.compStrengthMpa).reduce((a, b) => a + b) / validComp.length : 0.0;
+                final avgComp = samples.where((s) => s.compStrengthMpa > 0).isEmpty
+                    ? 0.0
+                    : samples.where((s) => s.compStrengthMpa > 0).map((s) => s.compStrengthMpa).reduce((a, b) => a + b) /
+                        samples.where((s) => s.compStrengthMpa > 0).length;
 
                 ExportService.exportGostProtocol(
                   context: context,
                   seriesId: record.id,
-                  samples: items,
-                  avgTensile: avgT,
-                  avgComp: avgC,
+                  samples: samples,
+                  avgTensile: avgTensile,
+                  avgComp: avgComp,
                   shareImmediately: false,
                 );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.straighten, color: Color(0xFF059669)),
+              title: const Text('Ведомость площадей образцов', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Краткая ведомость (№, Шифр, S)', style: TextStyle(fontSize: 12)),
+              onTap: () {
+                Navigator.pop(ctx);
+                ExportService.exportGeometryOnly(context: context, record: record, shareImmediately: false);
               },
             ),
           ],
@@ -131,17 +152,12 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     );
   }
 
-  Future<void> _delete(String id) async {
-    await ArchiveService.deleteRecord(id);
-    _load();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Журнал испытаний', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+        title: const Text('Журнал испытаний'),
         backgroundColor: Colors.white,
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
@@ -149,97 +165,76 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
           : _records.isEmpty
-              ? const Center(child: Text('Журнал пуст.', style: TextStyle(color: Color(0xFF94A3B8))))
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.folder_open, size: 56, color: Color(0xFF94A3B8)),
+                      SizedBox(height: 12),
+                      Text('Журнал пока пуст', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                      SizedBox(height: 4),
+                      Text('Сохранённые серии испытаний появятся здесь', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                    ],
+                  ),
+                )
               : ListView.builder(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   itemCount: _records.length,
                   itemBuilder: (ctx, idx) {
-                    final rec = _records[idx];
-                    final hasLoads = rec.samples.any((s) => s.loadKn > 0);
-
+                    final record = _records[idx];
                     return Card(
                       color: Colors.white,
                       elevation: 1,
                       margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       child: Padding(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(14),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(rec.id, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                      Text(rec.date, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
-                                    ],
-                                  ),
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: const Color(0xFFEFF6FF),
+                                  child: Text('${_records.length - idx}',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                                 ),
-                                IconButton(
-                                  icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB), size: 22),
-                                  tooltip: 'Экспорт',
-                                  onPressed: () => _showRecordExportMenu(rec),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626), size: 20),
-                                  onPressed: () => _delete(rec.id),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                if (File(rec.imagePath).existsSync())
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.file(File(rec.imagePath), width: 60, height: 60, fit: BoxFit.cover),
-                                  ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('Образцов: ${rec.samples.length}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
-                                      if (hasLoads)
-                                        Container(
-                                          margin: const EdgeInsets.only(top: 4),
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(4)),
-                                          child: const Text('Расчёт нагрузки выполнен', style: TextStyle(fontSize: 10, color: Color(0xFF059669), fontWeight: FontWeight.bold)),
-                                        ),
+                                      Text(record.id, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A))),
+                                      const SizedBox(height: 2),
+                                      Text(record.date, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                                     ],
                                   ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.file_download_outlined, color: Color(0xFF2563EB)),
+                                  tooltip: 'Экспорт',
+                                  onPressed: () => _exportRecord(record),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
+                                  tooltip: 'Удалить',
+                                  onPressed: () => _confirmDeleteRecord(record),
                                 ),
                               ],
                             ),
                             const Divider(height: 20, color: Color(0xFFF1F5F9)),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF475569),
-                                    side: const BorderSide(color: Color(0xFFCBD5E1)),
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Образцов: ${record.samples.length}',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
                                   ),
-                                  icon: const Icon(Icons.table_chart_outlined, size: 14),
-                                  label: const Text('Площади', style: TextStyle(fontSize: 11)),
-                                  onPressed: () => ExportService.exportGeometryOnly(context: context, record: rec, shareImmediately: false),
                                 ),
-                                const SizedBox(width: 8),
-                                ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF2563EB),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  icon: const Icon(Icons.calculate_outlined, size: 16),
-                                  label: Text(hasLoads ? 'Расчёт нагрузки' : 'Внести нагрузки (P)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                  onPressed: () => _openStrengthForRecord(rec),
+                                Text(
+                                  'S общ: ${record.totalAreaCm2.toStringAsFixed(2)} см²',
+                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF2563EB)),
                                 ),
                               ],
                             ),
