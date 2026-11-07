@@ -7,7 +7,6 @@ import 'archive_service.dart';
 import '../features/strength/strength_calculator_sheet.dart';
 
 class ExportService {
-  /// Мгновенная запись CSV в локальную директорию без таймаутов FUSE
   static Future<File> _writeCsvFile({
     required String filename,
     required String content,
@@ -19,7 +18,6 @@ class ExportService {
     return file;
   }
 
-  /// 1. Ведомость «Площади»
   static Future<void> exportGeometryOnly({
     required BuildContext context,
     required TestRecord record,
@@ -44,8 +42,8 @@ class ExportService {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF2563EB),
-          content: Text('Файл сформирован:\n$filename'),
-          duration: const Duration(seconds: 4),
+          content: Text('Файл сохранён:\n$filename'),
+          duration: const Duration(seconds: 3),
           action: SnackBarAction(
             label: 'Отправить',
             textColor: Colors.white,
@@ -60,7 +58,6 @@ class ExportService {
     }
   }
 
-  /// 2. Результаты испытаний ГОСТ 24941-81
   static Future<void> exportGostProtocol({
     required BuildContext context,
     required String seriesId,
@@ -71,14 +68,14 @@ class ExportService {
   }) async {
     final StringBuffer sb = StringBuffer();
 
-    // 1-я строка: Чистая высокая шапка без дефисов
+    // Графа 4 (Интервал, м) занимает 2 колонки, графа 6 (Литотип) — 1 колонку
     sb.writeln(
       '№;'
       '"Шифр\nпробы";;;'
       '"№ Скважины";'
-      '"Интервал, м";'
+      '"Интервал от,\nм";"Интервал до,\nм";'
       'Состояние;'
-      '"Литологический\nтип";;'
+      '"Литологический\nтип";'
       '"Площадь скола,\nсм2";'
       '"Разрушающая\nнагрузка, кН";'
       'K;'
@@ -90,8 +87,8 @@ class ExportService {
       '"Среднее значение\nсжатия, МПа"'
     );
 
-    // 2-я строка: Номера граф по ГОСТ
-    sb.writeln('1;2;;;3;4;5;6;;7;8;9;10;11;;;12;13');
+    // Номера граф
+    sb.writeln('1;2;;;3;4;;5;6;7;8;9;10;11;;;12;13');
 
     final int startRow = 3;
     final int endRow = startRow + samples.length - 1;
@@ -105,10 +102,10 @@ class ExportService {
       final colC = s.part2;
       final colD = s.part3;
       final colE = s.borehole;
-      final colF = s.interval;
-      final colG = s.condition;
-      final colH = s.lithology;
-      final colI = '';
+      final colF = s.interval; // Интервал от
+      final colG = '-';        // Интервал до
+      final colH = s.condition;
+      final colI = s.lithology;
 
       final colJ = s.areaCm2 > 0 ? s.areaCm2.toStringAsFixed(2) : '0.00';
       final colK = s.loadKn > 0 ? s.loadKn.toStringAsFixed(2) : '0.00';
