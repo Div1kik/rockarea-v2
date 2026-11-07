@@ -52,15 +52,26 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           title: record.id,
           initialSamples: items,
           onSaved: (updated) async {
-            for (int i = 0; i < updated.length; i++) {
-              final up = updated[i];
-              record.samples[i].loadKn = up.loadKn;
-              record.samples[i].condition = up.condition;
-              record.samples[i].tensileMpa = up.tensileStrengthMpa;
-              record.samples[i].compMpa = up.compStrengthMpa;
-              final name = [up.part1, up.part2, up.part3].where((e) => e.isNotEmpty).join(' ');
-              if (name.isNotEmpty) record.samples[i].name = name;
+            final List<SampleItem> updatedSamples = [];
+            for (int i = 0; i < record.samples.length; i++) {
+              final orig = record.samples[i];
+              if (i < updated.length) {
+                final up = updated[i];
+                final name = [up.part1, up.part2, up.part3].where((e) => e.isNotEmpty).join(' ');
+                updatedSamples.add(SampleItem(
+                  name: name.isNotEmpty ? name : orig.name,
+                  areaPx: orig.areaPx,
+                  areaCm2: orig.areaCm2,
+                  loadKn: up.loadKn,
+                  condition: up.condition,
+                  tensileMpa: up.tensileStrengthMpa,
+                  compMpa: up.compStrengthMpa,
+                ));
+              } else {
+                updatedSamples.add(orig);
+              }
             }
+            record.samples = updatedSamples;
             await ArchiveService.saveRecord(record);
             _loadRecords();
           },
