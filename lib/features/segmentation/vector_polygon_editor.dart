@@ -15,7 +15,13 @@ class _HistoryItem {
 
 class VectorPolygonEditor extends StatefulWidget {
   final String imagePath;
-  const VectorPolygonEditor({super.key, required this.imagePath});
+  final bool returnSamplesMode;
+
+  const VectorPolygonEditor({
+    super.key,
+    required this.imagePath,
+    this.returnSamplesMode = false,
+  });
 
   @override
   State<VectorPolygonEditor> createState() => _VectorPolygonEditorState();
@@ -638,7 +644,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(backgroundColor: Color(0xFF2563EB), content: Text('Серия сохранена в журнал!')),
       );
-      Navigator.pop(context);
+      Navigator.pop(context, widget.returnSamplesMode ? samples : null);
     }
   }
 
@@ -979,7 +985,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
                               icon: const Icon(Icons.check, size: 16),
-                              label: const Text('В журнал', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              label: Text(
+                                widget.returnSamplesMode ? 'Передать в расчет' : 'В журнал',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
                               onPressed: _polygons.isNotEmpty ? _saveToArchive : null,
                             ),
                           ],
