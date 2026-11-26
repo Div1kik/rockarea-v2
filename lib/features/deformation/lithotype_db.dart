@@ -7,8 +7,9 @@ class LithotypeProfile {
   final double alphaLit;          // Корреляционный множитель E / Rc (если нет пористости)
   final double porosityDecayB;    // Коэффициент падения жесткости от пористости
   final double nu0;               // Базовый коэффициент Пуассона монолита
-  final double kElasticBase;      // Бавое отношение E0 / E (коэффициент упругости)
+  final double kElasticBase;      // Базовое отношение E0 / E (коэффициент упругости)
   final double softeningFactor;   // Коэффициент размягчаемости при водонасыщении (w)
+  final double kConversionBase;   // Базовый коэф. перехода Rc / sigma_p для монолита (ВНИМИ / ГОСТ Р 59958)
 
   const LithotypeProfile({
     required this.id,
@@ -21,6 +22,7 @@ class LithotypeProfile {
     required this.nu0,
     required this.kElasticBase,
     required this.softeningFactor,
+    required this.kConversionBase,
   });
 }
 
@@ -37,6 +39,7 @@ class LithotypeDatabase {
       nu0: 0.24,
       kElasticBase: 0.82,
       softeningFactor: 0.85,
+      kConversionBase: 16.0,
     ),
     LithotypeProfile(
       id: 'gabbro_diabase',
@@ -49,6 +52,7 @@ class LithotypeDatabase {
       nu0: 0.24,
       kElasticBase: 0.90,
       softeningFactor: 0.94,
+      kConversionBase: 19.0,
     ),
     LithotypeProfile(
       id: 'granite',
@@ -61,6 +65,7 @@ class LithotypeDatabase {
       nu0: 0.22,
       kElasticBase: 0.88,
       softeningFactor: 0.92,
+      kConversionBase: 18.5,
     ),
     LithotypeProfile(
       id: 'basalt_andesite',
@@ -73,6 +78,7 @@ class LithotypeDatabase {
       nu0: 0.23,
       kElasticBase: 0.86,
       softeningFactor: 0.90,
+      kConversionBase: 17.5,
     ),
     LithotypeProfile(
       id: 'quartzite',
@@ -85,6 +91,7 @@ class LithotypeDatabase {
       nu0: 0.19,
       kElasticBase: 0.91,
       softeningFactor: 0.95,
+      kConversionBase: 21.0,
     ),
     LithotypeProfile(
       id: 'gneiss_schist',
@@ -97,6 +104,7 @@ class LithotypeDatabase {
       nu0: 0.23,
       kElasticBase: 0.82,
       softeningFactor: 0.85,
+      kConversionBase: 15.5,
     ),
     LithotypeProfile(
       id: 'skarn_serpentinite',
@@ -109,6 +117,7 @@ class LithotypeDatabase {
       nu0: 0.25,
       kElasticBase: 0.84,
       softeningFactor: 0.87,
+      kConversionBase: 16.5,
     ),
     LithotypeProfile(
       id: 'limestone_dolomite',
@@ -121,6 +130,7 @@ class LithotypeDatabase {
       nu0: 0.27,
       kElasticBase: 0.80,
       softeningFactor: 0.82,
+      kConversionBase: 14.0,
     ),
     LithotypeProfile(
       id: 'sandstone',
@@ -133,6 +143,7 @@ class LithotypeDatabase {
       nu0: 0.25,
       kElasticBase: 0.76,
       softeningFactor: 0.78,
+      kConversionBase: 13.5,
     ),
     LithotypeProfile(
       id: 'siltstone_argillite',
@@ -145,6 +156,7 @@ class LithotypeDatabase {
       nu0: 0.29,
       kElasticBase: 0.68,
       softeningFactor: 0.65,
+      kConversionBase: 11.0,
     ),
   ];
 
