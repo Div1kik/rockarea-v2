@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../core/export_service.dart';
+import '../deformation/lithotype_db.dart';
 
 class SampleStrengthData {
   String part1;
@@ -27,6 +28,8 @@ class SampleStrengthData {
 
   double get coeffK => areaCm2 > 0 ? 0.5076 * math.pow(areaCm2, 0.2506) : 0.0;
   double get tensileStrengthMpa => areaCm2 > 0 ? (7.5 * loadKn * coeffK) / areaCm2 : 0.0;
+
+  /// Классический ступенчатый коэффициент по ГОСТ 24941-81 (12 / 16 / 20)
   double get conversionCoeff {
     final m = tensileStrengthMpa;
     if (m <= 0) return 0.0;
@@ -34,7 +37,20 @@ class SampleStrengthData {
     if (m < 5.0) return 16.0;
     return 20.0;
   }
+
   double get compStrengthMpa => tensileStrengthMpa * conversionCoeff;
+
+  /// Комбинированный коэффициент пересчета: базовый К литотипа * плавный индекс сохранности по sigma_p
+  double combinedConversionCoeff(LithotypeProfile profile) {
+    final m = tensileStrengthMpa;
+    if (m <= 0) return 0.0;
+    final double integrityFactor = math.min(1.05, 0.65 + 0.22 * math.log(m + 1.0));
+    return profile.kConversionBase * integrityFactor;
+  }
+
+  double combinedCompStrengthMpa(LithotypeProfile profile) {
+    return tensileStrengthMpa * combinedConversionCoeff(profile);
+  }
 }
 
 class StrengthCalculatorSheet extends StatefulWidget {
@@ -55,12 +71,16 @@ class StrengthCalculatorSheet extends StatefulWidget {
 
 class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
   late List<SampleStrengthData> _samples;
+  bool _useLithotypeMode = false;
+  String _selectedLithotypeId = 'unknown_rock';
 
   @override
   void initState() {
     super.initState();
     _samples = widget.initialSamples;
   }
+
+  LithotypeProfile get _activeProfile => LithotypeDatabase.getById(_selectedLithotypeId);
 
   double get _avgTensile {
     final valid = _samples.where((s) => s.tensileStrengthMpa > 0).toList();
@@ -69,14 +89,30 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
   }
 
   double get _avgComp {
-    final valid = _samples.where((s) => s.compStrengthMpa > 0).toList();
-    if (valid.isEmpty) return 0.0;
-    return valid.map((s) => s.compStrengthMpa).reduce((a, b) => a + b) / valid.length;
+    if (_useLithotypeMode) {
+      final profile = _activeProfile;
+      final valid = _samples.where((s) => s.combinedCompStrengthMpa(profile) > 0).toList();
+      if (valid.isEmpty) return 0.0;
+      return valid.map((s) => s.combinedCompStrengthMpa(profile)).reduce((a, b) => a + b) / valid.length;
+    } else {
+      final valid = _samples.where((s) => s.compStrengthMpa > 0).toList();
+      if (valid.isEmpty) return 0.0;
+      return valid.map((s) => s.compStrengthMpa).reduce((a, b) => a + b) / valid.length;
+    }
+  }
+
+  void _applyLithotypeToSamples(String newId) {
+    final profile = LithotypeDatabase.getById(newId);
+    setState(() {
+      _selectedLithotypeId = newId;
+      for (final s in _samples) {
+        s.lithology = profile.name.split('/').first.trim();
+      }
+    });
   }
 
   void _editSample(int index) {
     final s = _samples[index];
-    // Единый текст шифра через пробел, либо пустая строка
     final initialCipher = [s.part1, s.part2, s.part3].where((e) => e.isNotEmpty).join(' ');
     final cipherCtrl = TextEditingController(text: initialCipher);
     final loadCtrl = TextEditingController(text: s.loadKn > 0 ? s.loadKn.toString() : '');
@@ -96,7 +132,6 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               children: [
                 const Text('Шифр пробы (через пробел):', style: TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
-                // Единое пустое поле с серым примером
                 TextField(
                   controller: cipherCtrl,
                   decoration: const InputDecoration(
@@ -166,6 +201,8 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final profile = _activeProfile;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -183,6 +220,8 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               samples: _samples,
               avgTensile: _avgTensile,
               avgComp: _avgComp,
+              useLithotypeConversion: _useLithotypeMode,
+              lithotypeProfile: _useLithotypeMode ? profile : null,
               shareImmediately: false,
             ),
           ),
@@ -203,8 +242,68 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
       ),
       body: Column(
         children: [
+          // Переключатель методики пересчета: ГОСТ 24941-81 vs Комбинированный (Литотип + sigma_p)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+            color: Colors.white,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment<bool>(
+                      value: false,
+                      icon: Icon(Icons.rule, size: 16),
+                      label: Text('ГОСТ 24941 (12/16/20)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                    ButtonSegment<bool>(
+                      value: true,
+                      icon: Icon(Icons.layers_outlined, size: 16),
+                      label: Text('Литотип + σp (комб.)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                  selected: {_useLithotypeMode},
+                  onSelectionChanged: (set) {
+                    setState(() {
+                      _useLithotypeMode = set.first;
+                      if (_useLithotypeMode) {
+                        _applyLithotypeToSamples(_selectedLithotypeId);
+                      }
+                    });
+                  },
+                ),
+                if (_useLithotypeMode) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: _selectedLithotypeId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Порода (Kлит + поправка на прочность σp)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    items: LithotypeDatabase.profiles
+                        .map((p) => DropdownMenuItem(
+                              value: p.id,
+                              child: Text('${p.name} (Kлит=${p.kConversionBase.toStringAsFixed(1)})',
+                                  style: const TextStyle(fontSize: 12)),
+                            ))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) _applyLithotypeToSamples(val);
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+
+          // Сводная панель средних значений
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             color: Colors.white,
             child: Row(
               children: [
@@ -212,7 +311,7 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('СР. РАСТЯЖЕНИЕ', style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                      const Text('СР. РАСТЯЖЕНИЕ σp', style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
                       Text('${_avgTensile.toStringAsFixed(2)} МПа', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
                     ],
                   ),
@@ -223,8 +322,22 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('СР. СЖАТИЕ Rc', style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
-                      Text('${_avgComp.toStringAsFixed(1)} МПа', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
+                      Text(
+                        _useLithotypeMode ? 'СР. СЖАТИЕ Rc (ЛИТОТИП)' : 'СР. СЖАТИЕ Rc (ГОСТ)',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: _useLithotypeMode ? const Color(0xFF059669) : const Color(0xFF64748B),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        '${_avgComp.toStringAsFixed(1)} МПа',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: _useLithotypeMode ? const Color(0xFF059669) : const Color(0xFF2563EB),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -232,6 +345,8 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
             ),
           ),
           const Divider(height: 1, color: Color(0xFFE2E8F0)),
+
+          // Список образцов
           Expanded(
             child: ListView.separated(
               itemCount: _samples.length,
@@ -239,6 +354,8 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
               itemBuilder: (ctx, idx) {
                 final s = _samples[idx];
                 final cipherLabel = [s.part1, s.part2, s.part3].where((e) => e.isNotEmpty).join(' ');
+                final double activeRc = _useLithotypeMode ? s.combinedCompStrengthMpa(profile) : s.compStrengthMpa;
+                final double activeK = _useLithotypeMode ? s.combinedConversionCoeff(profile) : s.conversionCoeff;
 
                 return ListTile(
                   tileColor: Colors.white,
@@ -246,8 +363,15 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                   onTap: () => _editSample(idx),
                   leading: CircleAvatar(
                     radius: 12,
-                    backgroundColor: const Color(0xFFEFF6FF),
-                    child: Text('${idx + 1}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                    backgroundColor: _useLithotypeMode ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF),
+                    child: Text(
+                      '${idx + 1}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: _useLithotypeMode ? const Color(0xFF059669) : const Color(0xFF2563EB),
+                      ),
+                    ),
                   ),
                   title: Row(
                     children: [
@@ -262,15 +386,28 @@ class _StrengthCalculatorSheetState extends State<StrengthCalculatorSheet> {
                     ],
                   ),
                   subtitle: Text(
-                    'S = ${s.areaCm2.toStringAsFixed(2)} см² | P = ${s.loadKn > 0 ? '${s.loadKn} кН' : 'не задана'}',
+                    'S = ${s.areaCm2.toStringAsFixed(2)} см² | P = ${s.loadKn > 0 ? '${s.loadKn} кН' : 'не задана'}'
+                    '${activeK > 0 ? ' | Kпер = ${activeK.toStringAsFixed(1)}' : ''}',
                     style: TextStyle(fontSize: 11, color: s.loadKn > 0 ? const Color(0xFF64748B) : const Color(0xFFDC2626)),
                   ),
                   trailing: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('Rc: ${s.compStrengthMpa.toStringAsFixed(1)} МПа', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF2563EB))),
-                      const Text('Изменить', style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
+                      Text(
+                        'Rc: ${activeRc.toStringAsFixed(1)} МПа',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: _useLithotypeMode ? const Color(0xFF059669) : const Color(0xFF2563EB),
+                        ),
+                      ),
+                      Text(
+                        _useLithotypeMode && s.compStrengthMpa > 0
+                            ? 'ГОСТ: ${s.compStrengthMpa.toStringAsFixed(1)}'
+                            : 'Изменить',
+                        style: const TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold),
+                      ),
                     ],
                   ),
                 );
