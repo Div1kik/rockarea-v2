@@ -167,6 +167,27 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     }
   }
 
+  Size _getCurrentCanvasSize() {
+    final RenderBox? box = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box != null && box.hasSize && box.size.width > 0 && box.size.height > 0) {
+      return box.size;
+    }
+    return const Size(1.0, 1.0);
+  }
+
+  double _computePolygonAreaCm2(List<Offset> polyPoints, [Size? explicitCanvasSize]) {
+    final Size canvasSize = explicitCanvasSize ?? _getCurrentCanvasSize();
+    final screenA4 = _a4Corners
+        .map((p) => Offset(p.dx * canvasSize.width, p.dy * canvasSize.height))
+        .toList();
+
+    return PolygonMath.computeCorrectedAreaCm2(
+      polygonPoints: polyPoints,
+      a4ScreenCorners: screenA4,
+      fallbackPixelsPerCm2: _pixelsPerCm2,
+    );
+  }
+
   Offset? _screenToCanvas(Offset screenPos) {
     final RenderBox? box = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return null;
@@ -265,8 +286,9 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
   void _editSampleInline(int index) {
     final poly = _polygons[index];
-    final area = PolygonMath.computeShoelaceArea(poly.points) / _pixelsPerCm2;
+    final area = _computePolygonAreaCm2(poly.points);
     final existing = _strengthDataMap[index] ?? SampleStrengthData(areaCm2: area);
+    existing.areaCm2 = area;
 
     final initialCipher = [existing.part1, existing.part2, existing.part3].where((e) => e.isNotEmpty).join(' ');
     final cipherCtrl = TextEditingController(text: initialCipher);
@@ -341,6 +363,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                   existing.part1 = raw.isNotEmpty ? raw[0] : '';
                   existing.part2 = raw.length > 1 ? raw[1] : '';
                   existing.part3 = raw.length > 2 ? raw[2] : '';
+                  existing.areaCm2 = area;
                   existing.loadKn = double.tryParse(loadCtrl.text.replaceAll(',', '.')) ?? 0.0;
                   existing.condition = condition;
                   _strengthDataMap[index] = existing;
@@ -567,10 +590,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   }
 
   void _openStrengthCalculator() {
+    final Size canvasSize = _getCurrentCanvasSize();
     final List<SampleStrengthData> items = [];
     for (int i = 0; i < _polygons.length; i++) {
       final p = _polygons[i];
-      final area = PolygonMath.computeShoelaceArea(p.points) / _pixelsPerCm2;
+      final area = _computePolygonAreaCm2(p.points, canvasSize);
       final existing = _strengthDataMap[i];
 
       items.add(SampleStrengthData(
@@ -605,16 +629,21 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
   Future<void> _saveToArchive() async {
     if (_polygons.isEmpty) return;
 
+    final Size canvasSize = _getCurrentCanvasSize();
     double totalArea = 0.0;
     final List<SampleItem> samples = [];
 
     for (int i = 0; i < _polygons.length; i++) {
       final p = _polygons[i];
       final px = PolygonMath.computeShoelaceArea(p.points);
-      final cm2 = px / _pixelsPerCm2;
+      final cm2 = _computePolygonAreaCm2(p.points, canvasSize);
       totalArea += cm2;
 
       final str = _strengthDataMap[i];
+      if (str != null) {
+        str.areaCm2 = cm2;
+      }
+
       samples.add(SampleItem(
         name: p.id,
         areaPx: px,
@@ -653,12 +682,6 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
     final double imgAspect = (_decodedImage != null && _decodedImage!.height > 0)
         ? _decodedImage!.width / _decodedImage!.height
         : 1.0;
-
-    double totalAreaCm2 = 0.0;
-    for (final p in _polygons) {
-      final pxArea = PolygonMath.computeShoelaceArea(p.points);
-      totalAreaCm2 += (pxArea / _pixelsPerCm2);
-    }
 
     return PopScope(
       canPop: false,
@@ -708,6 +731,11 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
 
             _recalculateScale(canvasSize);
             final bool isManipulating = _activePointIndex != -1 || _isDraggingWholeObject || _isLassoMode || _isEraserMode;
+
+            double totalAreaCm2 = 0.0;
+            for (final p in _polygons) {
+              totalAreaCm2 += _computePolygonAreaCm2(p.points, canvasSize);
+            }
 
             return Column(
               children: [
@@ -968,7 +996,10 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                         decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(4)),
-                                        child: Text('${_pixelsPerCm2.toStringAsFixed(0)} px/см²', style: const TextStyle(fontSize: 9, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
+                                        child: Text(
+                                          _a4Corners.length == 4 ? 'Гомография А4' : '${_pixelsPerCm2.toStringAsFixed(0)} px/см²',
+                                          style: const TextStyle(fontSize: 9, color: Color(0xFF2563EB), fontWeight: FontWeight.bold),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -1002,8 +1033,7 @@ class _VectorPolygonEditorState extends State<VectorPolygonEditor> {
                                 itemCount: _polygons.length,
                                 itemBuilder: (context, idx) {
                                   final poly = _polygons[idx];
-                                  final pxArea = PolygonMath.computeShoelaceArea(poly.points);
-                                  final cm2Area = pxArea / _pixelsPerCm2;
+                                  final cm2Area = _computePolygonAreaCm2(poly.points, canvasSize);
                                   final isSelected = (idx == _activePolygonIndex);
 
                                   final existingData = _strengthDataMap[idx];
