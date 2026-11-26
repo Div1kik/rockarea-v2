@@ -197,8 +197,50 @@ class MainMenuScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+          
+          // Карточка 3: Деформационные характеристики (Инденторы / Протодьяконов / Пористость)
+          Card(
+            color: Colors.white,
+            elevation: 1.5,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DeformationModuleScreen()),
+                );
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: Color(0xFFECFDF5),
+                      child: Icon(Icons.analytics_outlined, color: Color(0xFF059669), size: 22),
+                    ),
+                    SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Деформации (E, E₀, ν, μ)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A))),
+                          SizedBox(height: 3),
+                          Text('Пошаговый расчет по щебню: инденторы ГОСТ 24941, Протодьяконов, график', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
 
-          // Карточка 3: Задел на будущее
+
+          // Карточка 4: Задел на будущее
           Card(
             color: const Color(0xFFF1F5F9),
             elevation: 0,
