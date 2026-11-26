@@ -7,7 +7,7 @@ class LithotypeProfile {
   final double alphaLit;          // Корреляционный множитель E / Rc (если нет пористости)
   final double porosityDecayB;    // Коэффициент падения жесткости от пористости
   final double nu0;               // Базовый коэффициент Пуассона монолита
-  final double kElasticBase;      // Базовое отношение E0 / E (коэффициент упругости)
+  final double kElasticBase;      // Бавое отношение E0 / E (коэффициент упругости)
   final double softeningFactor;   // Коэффициент размягчаемости при водонасыщении (w)
 
   const LithotypeProfile({
@@ -26,6 +26,18 @@ class LithotypeProfile {
 
 class LithotypeDatabase {
   static const List<LithotypeProfile> profiles = [
+    LithotypeProfile(
+      id: 'unknown_rock',
+      name: 'Неизвестная / Не определена (средние коэф.)',
+      genesis: 'Не определен',
+      rhoSDefault: 2.65,
+      eSkeletonGpa: 55.0,
+      alphaLit: 250.0,
+      porosityDecayB: 0.052,
+      nu0: 0.24,
+      kElasticBase: 0.82,
+      softeningFactor: 0.85,
+    ),
     LithotypeProfile(
       id: 'gabbro_diabase',
       name: 'Габбро / Диабаз / Норит / Долерит',
