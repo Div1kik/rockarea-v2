@@ -7,56 +7,39 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../deformation/lithotype_db.dart';
 
+/// Одна из 5 навесок внутри образца
 class ProtoSubsample {
-  double massG;       // Масса навески, г (40..60 г)
-  int dropsN;         // Число сбрасываний гири n
-  double dustHeightMm; // Высота столбика пыли (<0.5 мм) в объемомере d=23 мм, мм
+  double massG; // Масса навески (40..60 г)
+  int dropsN;   // Число сбрасываний гири на этой навеске
 
   ProtoSubsample({
     this.massG = 50.0,
     this.dropsN = 5,
-    this.dustHeightMm = 0.0,
   });
-
-  bool get isValid => dropsN > 0 && dustHeightMm > 0;
-
-  /// Коэффициент крепости f по ГОСТ 21153.1-75: f = 20 * n / l
-  double get strengthCoeffF => isValid ? (20.0 * dropsN) / dustHeightMm : 0.0;
 
   Map<String, dynamic> toJson() => {
         'massG': massG,
         'dropsN': dropsN,
-        'dustHeightMm': dustHeightMm,
       };
 
   factory ProtoSubsample.fromJson(Map<String, dynamic> json) => ProtoSubsample(
         massG: (json['massG'] as num?)?.toDouble() ?? 50.0,
         dropsN: (json['dropsN'] as num?)?.toInt() ?? 5,
-        dustHeightMm: (json['dustHeightMm'] as num?)?.toDouble() ?? 0.0,
       );
 }
 
-class ProtodyakonovRecord {
-  final String id;
-  final String date;
-  String cipher;
-  String borehole;
-  String interval;
-  String lithotypeId;
-  String condition; // 'n', 'w', 'h'
-  double? rhoDGcm3;
+/// Один образец (состоит из 5 навесок, которые ссыпаются вместе и сеются разом)
+class ProtoSpecimen {
+  String label;
   List<ProtoSubsample> subsamples;
+  double totalDustHeightMm; // Общая высота столбика пыли l (мм) в объемомере по всем 5 навескам
+  double? totalDustMassG;   // Общая масса отсеянной пыли (<0.5 мм), г
 
-  ProtodyakonovRecord({
-    required this.id,
-    required this.date,
-    this.cipher = '',
-    this.borehole = '',
-    this.interval = '',
-    this.lithotypeId = 'gabbro_diabase',
-    this.condition = 'h',
-    this.rhoDGcm3,
+  ProtoSpecimen({
+    required this.label,
     List<ProtoSubsample>? subsamples,
+    this.totalDustHeightMm = 0.0,
+    this.totalDustMassG,
   }) : subsamples = subsamples ??
             [
               ProtoSubsample(),
@@ -66,61 +49,112 @@ class ProtodyakonovRecord {
               ProtoSubsample(),
             ];
 
-  LithotypeProfile get lithotype => LithotypeDatabase.getById(lithotypeId);
+  int get totalDropsN => subsamples.fold<int>(0, (sum, s) => sum + s.dropsN);
 
-  /// Рекомендуемая масса одной навески по ГОСТ 21153.1-75 (объем ~20 см3 => m = 20 * rho)
-  double get recommendedMassG {
-    final rho = (rhoDGcm3 != null && rhoDGcm3! > 1.0) ? rhoDGcm3! : lithotype.rhoSDefault;
-    return (20.0 * rho).clamp(40.0, 65.0);
-  }
+  double get totalSampleMassG => subsamples.fold<double>(0.0, (sum, s) => sum + s.massG);
 
-  List<ProtoSubsample> get validSubsamples => subsamples.where((s) => s.isValid).toList();
+  bool get isValid => totalDropsN > 0 && totalDustHeightMm > 0;
 
-  /// Средний коэффициент крепости f
-  double get avgStrengthF {
-    final valid = validSubsamples;
-    if (valid.isEmpty) return 0.0;
-    final sum = valid.map((s) => s.strengthCoeffF).reduce((a, b) => a + b);
-    return sum / valid.length;
-  }
+  /// Коэффициент крепости образца по ГОСТ 21153.1-75: f = 20 * sum(n) / l_общ
+  double get strengthCoeffF => isValid ? (20.0 * totalDropsN) / totalDustHeightMm : 0.0;
 
-  /// Суммарный расчет по ГОСТ: f = 20 * sum(n) / sum(l)
-  double get pooledStrengthF {
-    final valid = validSubsamples;
-    if (valid.isEmpty) return 0.0;
-    final totalN = valid.map((s) => s.dropsN).reduce((a, b) => a + b);
-    final totalL = valid.map((s) => s.dustHeightMm).reduce((a, b) => a + b);
-    return totalL > 0 ? (20.0 * totalN) / totalL : 0.0;
-  }
-
-  /// Коэффициент вариации V, %
-  double get variationPercent {
-    final valid = validSubsamples;
-    if (valid.length < 2) return 0.0;
-    final mean = avgStrengthF;
-    if (mean <= 0) return 0.0;
-    double sqDiffSum = 0.0;
-    for (final s in valid) {
-      sqDiffSum += math.pow(s.strengthCoeffF - mean, 2);
-    }
-    final stdDev = math.sqrt(sqDiffSum / (valid.length - 1));
-    return (stdDev / mean) * 100.0;
-  }
-
-  /// Эквивалентный предел прочности на одноосное сжатие Rc, МПа (Rc ≈ 10 * f)
-  double get estimatedRcMpa {
-    final f = pooledStrengthF;
+  /// Предел прочности на одноосное сжатие по образцу, МПа
+  double estimatedRcMpa(double softeningFactor, bool isWaterSaturated) {
+    final f = strengthCoeffF;
     if (f <= 0) return 0.0;
     double rc = f * 10.0;
-    if (condition == 'w') {
-      rc *= lithotype.softeningFactor;
-    }
+    if (isWaterSaturated) rc *= softeningFactor;
     return rc;
   }
 
-  /// Категория крепости по шкале проф. М. М. Протодьяконова
+  Map<String, dynamic> toJson() => {
+        'label': label,
+        'subsamples': subsamples.map((e) => e.toJson()).toList(),
+        'totalDustHeightMm': totalDustHeightMm,
+        'totalDustMassG': totalDustMassG,
+      };
+
+  factory ProtoSpecimen.fromJson(Map<String, dynamic> json) => ProtoSpecimen(
+        label: json['label'] as String? ?? 'Образец',
+        subsamples: (json['subsamples'] as List<dynamic>?)
+            ?.map((e) => ProtoSubsample.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        totalDustHeightMm: (json['totalDustHeightMm'] as num?)?.toDouble() ?? 0.0,
+        totalDustMassG: (json['totalDustMassG'] as num?)?.toDouble(),
+      );
+}
+
+/// Проба (обычно 4 образца по 5 навесок)
+class ProtodyakonovRecord {
+  final String id;
+  final String date;
+  String cipher;
+  String borehole;
+  String interval;
+  String lithotypeId;
+  String condition; // 'h', 'n', 'w'
+  double? rhoDGcm3;
+  List<ProtoSpecimen> specimens;
+
+  ProtodyakonovRecord({
+    required this.id,
+    required this.date,
+    this.cipher = '',
+    this.borehole = '',
+    this.interval = '',
+    this.lithotypeId = 'unknown_rock',
+    this.condition = 'h',
+    this.rhoDGcm3,
+    List<ProtoSpecimen>? specimens,
+  }) : specimens = specimens ??
+            [
+              ProtoSpecimen(label: 'Образец 1'),
+              ProtoSpecimen(label: 'Образец 2'),
+              ProtoSpecimen(label: 'Образец 3'),
+              ProtoSpecimen(label: 'Образец 4'),
+            ];
+
+  LithotypeProfile get lithotype => LithotypeDatabase.getById(lithotypeId);
+
+  double get recommendedMassG {
+    final rho = (rhoDGcm3 != null && rhoDGcm3! > 1.0) ? rhoDGcm3! : lithotype.rhoSDefault;
+    return (20.0 * rho).clamp(40.0, 60.0);
+  }
+
+  List<ProtoSpecimen> get validSpecimens => specimens.where((s) => s.isValid).toList();
+
+  /// Средний коэффициент крепости f по пробе (по всем заполненным образцам)
+  double get avgStrengthF {
+    final valid = validSpecimens;
+    if (valid.isEmpty) return 0.0;
+    return valid.map((s) => s.strengthCoeffF).reduce((a, b) => a + b) / valid.length;
+  }
+
+  /// Средний предел прочности Rc по пробе, МПа
+  double get avgRcMpa {
+    final f = avgStrengthF;
+    if (f <= 0) return 0.0;
+    double rc = f * 10.0;
+    if (condition == 'w') rc *= lithotype.softeningFactor;
+    return rc;
+  }
+
+  /// Коэффициент вариации V (%) между образцами в пробе
+  double get variationPercent {
+    final valid = validSpecimens;
+    if (valid.length < 2) return 0.0;
+    final mean = avgStrengthF;
+    if (mean <= 0) return 0.0;
+    double sqSum = 0.0;
+    for (final s in valid) {
+      sqSum += math.pow(s.strengthCoeffF - mean, 2);
+    }
+    final stdDev = math.sqrt(sqSum / (valid.length - 1));
+    return (stdDev / mean) * 100.0;
+  }
+
   String get strengthCategory {
-    final f = pooledStrengthF;
+    final f = avgStrengthF;
     if (f <= 0) return 'Нет данных';
     if (f >= 20) return 'I кат. — В высшей степени крепкие (f ≥ 20)';
     if (f >= 15) return 'II кат. — Очень крепкие (f = 15–19)';
@@ -140,7 +174,7 @@ class ProtodyakonovRecord {
         'lithotypeId': lithotypeId,
         'condition': condition,
         'rhoDGcm3': rhoDGcm3,
-        'subsamples': subsamples.map((e) => e.toJson()).toList(),
+        'specimens': specimens.map((e) => e.toJson()).toList(),
       };
 
   factory ProtodyakonovRecord.fromJson(Map<String, dynamic> json) => ProtodyakonovRecord(
@@ -149,17 +183,17 @@ class ProtodyakonovRecord {
         cipher: json['cipher'] as String? ?? '',
         borehole: json['borehole'] as String? ?? '',
         interval: json['interval'] as String? ?? '',
-        lithotypeId: json['lithotypeId'] as String? ?? 'gabbro_diabase',
+        lithotypeId: json['lithotypeId'] as String? ?? 'unknown_rock',
         condition: json['condition'] as String? ?? 'h',
         rhoDGcm3: (json['rhoDGcm3'] as num?)?.toDouble(),
-        subsamples: (json['subsamples'] as List<dynamic>?)
-            ?.map((e) => ProtoSubsample.fromJson(e as Map<String, dynamic>))
+        specimens: (json['specimens'] as List<dynamic>?)
+            ?.map((e) => ProtoSpecimen.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }
 
 class ProtoStorageService {
-  static const String _key = 'rockarea_protodyakonov_records';
+  static const String _key = 'rockarea_protodyakonov_records_v2';
 
   static Future<List<ProtodyakonovRecord>> getRecords() async {
     final prefs = await SharedPreferences.getInstance();
@@ -197,30 +231,61 @@ class ProtoStorageService {
     required ProtodyakonovRecord record,
   }) async {
     final sb = StringBuffer();
-    sb.write('ПРОТОКОЛ ОПРЕДЕЛЕНИЯ КОЭФФИЦИЕНТА КРЕПОСТИ ПО М. М. ПРОТОДЬЯКОНОВУ (ГОСТ 21153.1-75)\r\n');
+    sb.write('ВЕДОМОСТЬ ОПРЕДЕЛЕНИЯ КРЕПОСТИ ПО М. М. ПРОТОДЬЯКОНОВУ (ГОСТ 21153.1-75)\r\n');
     sb.write('Шифр пробы;${record.cipher.isNotEmpty ? record.cipher : record.id};Дата;${record.date}\r\n');
     sb.write('Литотип;${record.lithotype.name};Состояние;${record.condition}\r\n');
     sb.write('\r\n');
-    sb.write('№ навески;Масса навески m, г;Число сбрасываний n;Высота столбика пыли l, мм;Коэффициент крепости f;Средний f;Оценка Rc, МПа\r\n');
+    sb.write(
+      'Образец;'
+      'Навеска 1 (г / уд.);'
+      'Навеска 2 (г / уд.);'
+      'Навеска 3 (г / уд.);'
+      'Навеска 4 (г / уд.);'
+      'Навеска 5 (г / уд.);'
+      'Общая масса навесок, г;'
+      'Сумма ударов Σn;'
+      'Масса пыли (<0.5 мм), г;'
+      'Высота столбика пыли l, мм;'
+      'Коэф. крепости образца f;'
+      'Оценка Rc образца, МПа;'
+      'Средний f по пробе;'
+      'Средний Rc по пробе, МПа\r\n',
+    );
 
     const int startRow = 7;
-    final int endRow = startRow + record.subsamples.length - 1;
+    final int endRow = startRow + record.specimens.length - 1;
 
-    for (int i = 0; i < record.subsamples.length; i++) {
-      final s = record.subsamples[i];
+    for (int i = 0; i < record.specimens.length; i++) {
+      final sp = record.specimens[i];
       final r = startRow + i;
-      final fFormula = '"=IF(D$r>0; ROUND((20*C$r)/D$r; 2); 0)"';
-      final avgFormula = (i == 0) ? '"=ROUND((20*SUM(C$startRow:C$endRow))/SUM(D$startRow:D$endRow); 2)"' : '';
-      final rcFormula = (i == 0) ? '"=ROUND(F$startRow*10; 1)"' : '';
+
+      String subStr(int idx) {
+        if (idx >= sp.subsamples.length) return '-';
+        final s = sp.subsamples[idx];
+        return '${s.massG.toStringAsFixed(1)} г / ${s.dropsN}';
+      }
+
+      final dustMassStr = sp.totalDustMassG != null ? sp.totalDustMassG!.toStringAsFixed(2) : '';
+      final fFormula = '"=IF(J$r>0; ROUND((20*H$r)/J$r; 2); 0)"';
+      final rcFormula = '"=IF(K$r>0; ROUND(K$r*10; 1); 0)"';
+      final avgFFormula = (i == 0) ? '"=IF(COUNT(K$startRow:K$endRow)>0; ROUND(AVERAGE(K$startRow:K$endRow); 2); 0)"' : '';
+      final avgRcFormula = (i == 0) ? '"=IF(COUNT(L$startRow:L$endRow)>0; ROUND(AVERAGE(L$startRow:L$endRow); 1); 0)"' : '';
 
       sb.write(
-        '${i + 1};'
-        '${s.massG.toStringAsFixed(1)};'
-        '${s.dropsN};'
-        '${s.dustHeightMm.toStringAsFixed(1)};'
+        '${sp.label};'
+        '${subStr(0)};'
+        '${subStr(1)};'
+        '${subStr(2)};'
+        '${subStr(3)};'
+        '${subStr(4)};'
+        '${sp.totalSampleMassG.toStringAsFixed(1)};'
+        '${sp.totalDropsN};'
+        '$dustMassStr;'
+        '${sp.totalDustHeightMm.toStringAsFixed(1)};'
         '$fFormula;'
-        '$avgFormula;'
-        '$rcFormula\r\n',
+        '$rcFormula;'
+        '$avgFFormula;'
+        '$avgRcFormula\r\n',
       );
     }
 
@@ -303,7 +368,7 @@ class _ProtodyakonovModuleScreenState extends State<ProtodyakonovModuleScreen> {
         foregroundColor: Colors.white,
         onPressed: () => _openEditor(),
         icon: const Icon(Icons.add),
-        label: const Text('Новое испытание', style: TextStyle(fontWeight: FontWeight.bold)),
+        label: const Text('Новая проба', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -321,12 +386,12 @@ class _ProtodyakonovModuleScreenState extends State<ProtodyakonovModuleScreen> {
                         ),
                         const SizedBox(height: 16),
                         const Text(
-                          'Нет испытаний на копре',
+                          'Нет проб на копре',
                           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'Определение коэффициента крепости f и предела прочности Rc методом толчения щебня (фракция 20–40 мм) с подсказками по массе навески и числу ударов.',
+                          'Стандартная схема ГОСТ 21153.1-75: 1 проба = 4 образца по 5 навесок (40–60 г) с общим просеиванием и замером столбика пыли.',
                           textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                         ),
@@ -340,7 +405,7 @@ class _ProtodyakonovModuleScreenState extends State<ProtodyakonovModuleScreen> {
                           ),
                           onPressed: () => _openEditor(),
                           icon: const Icon(Icons.play_arrow),
-                          label: const Text('Начать испытание', style: TextStyle(fontWeight: FontWeight.bold)),
+                          label: const Text('Создать пробу', style: TextStyle(fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
@@ -378,7 +443,7 @@ class _ProtodyakonovModuleScreenState extends State<ProtodyakonovModuleScreen> {
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
-                                      'f = ${r.pooledStrengthF.toStringAsFixed(2)}',
+                                      'f ср = ${r.avgStrengthF.toStringAsFixed(2)}',
                                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFEA580C)),
                                     ),
                                   ),
@@ -391,10 +456,13 @@ class _ProtodyakonovModuleScreenState extends State<ProtodyakonovModuleScreen> {
                                   ),
                                 ],
                               ),
-                              Text('${r.lithotype.name} • ${r.date}', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                              Text(
+                                '${r.lithotype.name} • Образцов: ${r.validSpecimens.length}/${r.specimens.length} • ${r.date}',
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                              ),
                               const SizedBox(height: 8),
                               Text(
-                                'Оценка прочности: Rc = ${r.estimatedRcMpa.toStringAsFixed(1)} МПа • ${r.strengthCategory}',
+                                'Средняя прочность: Rc = ${r.avgRcMpa.toStringAsFixed(1)} МПа • V = ${r.variationPercent.toStringAsFixed(1)}%',
                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF059669)),
                               ),
                             ],
@@ -419,10 +487,9 @@ class ProtodyakonovEditorScreen extends StatefulWidget {
 class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
   late ProtodyakonovRecord _record;
   late TextEditingController _cipherCtrl;
-  late TextEditingController _boreholeCtrl;
-  late TextEditingController _intervalCtrl;
   late TextEditingController _rhoDCtrl;
-  bool _showGostGuide = true;
+  bool _showGostGuide = false;
+  int _selectedSpecimenIdx = 0;
 
   @override
   void initState() {
@@ -433,45 +500,38 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
 
     _record = widget.existingRecord ??
         ProtodyakonovRecord(
-          id: 'Копер #${now.millisecondsSinceEpoch.toString().substring(8)}',
+          id: 'Проба #${now.millisecondsSinceEpoch.toString().substring(8)}',
           date: dateStr,
         );
 
     _cipherCtrl = TextEditingController(text: _record.cipher);
-    _boreholeCtrl = TextEditingController(text: _record.borehole);
-    _intervalCtrl = TextEditingController(text: _record.interval);
     _rhoDCtrl = TextEditingController(text: _record.rhoDGcm3?.toString() ?? '');
   }
 
   @override
   void dispose() {
     _cipherCtrl.dispose();
-    _boreholeCtrl.dispose();
-    _intervalCtrl.dispose();
     _rhoDCtrl.dispose();
     super.dispose();
   }
 
   void _syncInputs() {
     _record.cipher = _cipherCtrl.text.trim();
-    _record.borehole = _boreholeCtrl.text.trim();
-    _record.interval = _intervalCtrl.text.trim();
     _record.rhoDGcm3 = double.tryParse(_rhoDCtrl.text.replaceAll(',', '.'));
   }
 
-  void _applyRecommendedMassToAll() {
-    final recMass = double.parse(_record.recommendedMassG.toStringAsFixed(1));
+  void _applyDropsToSpecimen(ProtoSpecimen sp, int drops) {
     setState(() {
-      for (final s in _record.subsamples) {
-        s.massG = recMass;
+      for (final s in sp.subsamples) {
+        s.dropsN = drops;
       }
     });
   }
 
-  void _applyDropsToAll(int drops) {
+  void _applyMassToSpecimen(ProtoSpecimen sp, double mass) {
     setState(() {
-      for (final s in _record.subsamples) {
-        s.dropsN = drops;
+      for (final s in sp.subsamples) {
+        s.massG = mass;
       }
     });
   }
@@ -481,7 +541,7 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
     await ProtoStorageService.saveRecord(_record);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(backgroundColor: Color(0xFF059669), content: Text('Протокол сохранен!')),
+        const SnackBar(backgroundColor: Color(0xFF059669), content: Text('Проба сохранена!')),
       );
     }
   }
@@ -489,21 +549,13 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
   @override
   Widget build(BuildContext context) {
     _syncInputs();
-    final f = _record.pooledStrengthF;
-    final rc = _record.estimatedRcMpa;
-    final varPct = _record.variationPercent;
-    final validCount = _record.validSubsamples.length;
-
-    // Проверка оптимальной высоты столбика пыли (по ГОСТ 21153.1-75 суммарно по 5 навескам 20..100 мм)
-    final totalDust = _record.validSubsamples.fold<double>(0.0, (sum, s) => sum + s.dustHeightMm);
-    String? heightAdvice;
-    if (validCount >= 3) {
-      if (totalDust < 20.0) {
-        heightAdvice = 'Суммарный столбик пыли (${totalDust.toStringAsFixed(1)} мм) < 20 мм: для следующей серии увеличьте число ударов n до 10–15.';
-      } else if (totalDust > 100.0) {
-        heightAdvice = 'Суммарный столбик пыли (${totalDust.toStringAsFixed(1)} мм) > 100 мм: порода мягкая, уменьшите число ударов n до 2–3.';
-      }
+    if (_selectedSpecimenIdx >= _record.specimens.length) {
+      _selectedSpecimenIdx = _record.specimens.length - 1;
     }
+    final activeSp = _record.specimens[_selectedSpecimenIdx];
+    final avgF = _record.avgStrengthF;
+    final avgRc = _record.avgRcMpa;
+    final varPct = _record.variationPercent;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -523,46 +575,33 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 30),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
-          // Блок 1: Интерактивная памятка по ГОСТ 21153.1-75
           if (_showGostGuide)
             Container(
-              margin: const EdgeInsets.only(bottom: 14),
+              margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
+              decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(14)),
+              child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.menu_book, color: Color(0xFFFB923C), size: 18),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'ПАМЯТКА ЛАБОРАНТА (ГОСТ 21153.1-75)',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
                   Text(
-                    '• Фракция щебня: 20–40 мм (допускается 10–20 мм), куски угловатые без лещадности.\n'
-                    '• Число параллельных навесок: минимум 5 шт. на одну пробу.\n'
-                    '• Масса 1 навески: 40–60 г (для выбранной породы ≈ ${_record.recommendedMassG.toStringAsFixed(0)} г).\n'
-                    '• Копер (гиря 2,4 кг, высота 600 мм): 10–15 ударов для крепких пород, 5 ударов для средних, 2–3 для слабых.\n'
-                    '• Сито 0,5 мм: просеивать 20–30 с, замерять высоту пыли в объемомере Ø 23 мм.',
-                    style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 11, height: 1.45),
+                    'МЕТОДИКА ПО ГОСТ 21153.1-75',
+                    style: TextStyle(color: Color(0xFFFB923C), fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    '1. Проба делится на 4 образца, каждый образец — на 5 навесок по 40–60 г (фракция 20–40 мм).\n'
+                    '2. Каждая из 5 навесок поочередно дробится в копре (гиря 2,4 кг с высоты 600 мм: обычно 5–15 ударов для крепких пород, 2–3 для слабых).\n'
+                    '3. Весь раздробленный материал 5 навесок ссыпается вместе и просеивается разом через сито 0,5 мм.\n'
+                    '4. Пыль (<0,5 мм) высыпается в объемомер Ø 23 мм — замеряется общая высота столбика l (оптимально 20–100 мм) и масса пыли.',
+                    style: TextStyle(color: Color(0xFFE2E8F0), fontSize: 11, height: 1.45),
                   ),
                 ],
               ),
             ),
 
-          // Блок 2: Паспорт пробы и автоподбор массы навески
+          // Паспорт пробы
           Card(
             color: Colors.white,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -584,7 +623,7 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
                     value: _record.lithotypeId,
                     isExpanded: true,
                     decoration: const InputDecoration(
-                      labelText: 'Литотип породы',
+                      labelText: 'Литотип породы (можно оставить неизвестным)',
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
@@ -627,81 +666,264 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  // Быстрые кнопки настройки всех навесок
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      ActionChip(
-                        avatar: const Icon(Icons.scale, size: 15, color: Color(0xFF2563EB)),
-                        label: Text('Масса ${_record.recommendedMassG.toStringAsFixed(0)} г всем', style: const TextStyle(fontSize: 11)),
-                        onPressed: _applyRecommendedMassToAll,
-                      ),
-                      ActionChip(
-                        label: const Text('3 удара', style: TextStyle(fontSize: 11)),
-                        onPressed: () => _applyDropsToAll(3),
-                      ),
-                      ActionChip(
-                        label: const Text('5 ударов', style: TextStyle(fontSize: 11)),
-                        onPressed: () => _applyDropsToAll(5),
-                      ),
-                      ActionChip(
-                        label: const Text('10 ударов', style: TextStyle(fontSize: 11)),
-                        onPressed: () => _applyDropsToAll(10),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 14),
 
-          // Блок 3: Список параллельных навесок (по умолчанию 5 шт. по ГОСТ)
+          // Переключатель 4 образцов внутри пробы
           Row(
             children: [
-              Expanded(
+              const Expanded(
                 child: Text(
-                  'Параллельные навески (${_record.subsamples.length} шт.)',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A)),
+                  'Образцы в пробе (по 5 навесок):',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
                 ),
               ),
               TextButton.icon(
                 onPressed: () {
                   setState(() {
-                    _record.subsamples.add(
-                      ProtoSubsample(
-                        massG: double.parse(_record.recommendedMassG.toStringAsFixed(1)),
-                        dropsN: _record.subsamples.isNotEmpty ? _record.subsamples.last.dropsN : 5,
-                      ),
-                    );
+                    _record.specimens.add(ProtoSpecimen(label: 'Образец ${_record.specimens.length + 1}'));
+                    _selectedSpecimenIdx = _record.specimens.length - 1;
                   });
                 },
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Добавить навеску'),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Образец', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: List.generate(_record.specimens.length, (idx) {
+                final sp = _record.specimens[idx];
+                final isSelected = idx == _selectedSpecimenIdx;
+                final hasData = sp.isValid;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    selected: isSelected,
+                    selectedColor: const Color(0xFF2563EB),
+                    backgroundColor: hasData ? const Color(0xFFECFDF5) : Colors.white,
+                    label: Text(
+                      hasData ? '${sp.label} (f=${sp.strengthCoeffF.toStringAsFixed(1)})' : sp.label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected
+                            ? Colors.white
+                            : (hasData ? const Color(0xFF059669) : const Color(0xFF334155)),
+                      ),
+                    ),
+                    onSelected: (_) => setState(() => _selectedSpecimenIdx = idx),
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 12),
 
-          for (int i = 0; i < _record.subsamples.length; i++) _buildSubsampleCard(i),
+          // Карточка выбранного образца (5 навесок + общий отсев пыли)
+          Card(
+            color: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${activeSp.label} — 5 навесок (40–60 г)',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A)),
+                        ),
+                      ),
+                      if (_record.specimens.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFDC2626)),
+                          tooltip: 'Удалить этот образец',
+                          onPressed: () {
+                            setState(() {
+                              _record.specimens.removeAt(_selectedSpecimenIdx);
+                              if (_selectedSpecimenIdx >= _record.specimens.length) {
+                                _selectedSpecimenIdx = _record.specimens.length - 1;
+                              }
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      ActionChip(
+                        label: Text('Всем ${_record.recommendedMassG.toStringAsFixed(0)} г', style: const TextStyle(fontSize: 11)),
+                        onPressed: () => _applyMassToSpecimen(
+                          activeSp,
+                          double.parse(_record.recommendedMassG.toStringAsFixed(1)),
+                        ),
+                      ),
+                      ActionChip(
+                        label: const Text('Всем 5 уд.', style: TextStyle(fontSize: 11)),
+                        onPressed: () => _applyDropsToSpecimen(activeSp, 5),
+                      ),
+                      ActionChip(
+                        label: const Text('Всем 10 уд.', style: TextStyle(fontSize: 11)),
+                        onPressed: () => _applyDropsToSpecimen(activeSp, 10),
+                      ),
+                      ActionChip(
+                        label: const Text('Всем 15 уд.', style: TextStyle(fontSize: 11)),
+                        onPressed: () => _applyDropsToSpecimen(activeSp, 15),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
 
-          if (heightAdvice != null)
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF7ED),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFDBA74)),
-              ),
-              child: Text(
-                heightAdvice,
-                style: const TextStyle(fontSize: 11, color: Color(0xFF9A3412), fontWeight: FontWeight.w600),
+                  // 5 строк навесок
+                  for (int i = 0; i < activeSp.subsamples.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 78,
+                            child: Text(
+                              'Навеска #${i + 1}:',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                            ),
+                          ),
+                          Expanded(
+                            child: TextFormField(
+                              key: ValueKey('sp_${_selectedSpecimenIdx}_m_${i}_${activeSp.subsamples[i].massG}'),
+                              initialValue: activeSp.subsamples[i].massG.toString(),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: const InputDecoration(
+                                labelText: 'Масса, г',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              ),
+                              onChanged: (v) {
+                                setState(() {
+                                  activeSp.subsamples[i].massG =
+                                      double.tryParse(v.replaceAll(',', '.')) ?? activeSp.subsamples[i].massG;
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextFormField(
+                              key: ValueKey('sp_${_selectedSpecimenIdx}_n_${i}_${activeSp.subsamples[i].dropsN}'),
+                              initialValue: activeSp.subsamples[i].dropsN.toString(),
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Ударов n',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              ),
+                              onChanged: (v) {
+                                setState(() {
+                                  activeSp.subsamples[i].dropsN = int.tryParse(v.trim()) ?? 0;
+                                });
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  const Divider(height: 20, color: Color(0xFFE2E8F0)),
+                  Text(
+                    'Результат общего просеивания (${activeSp.label}): Σm = ${activeSp.totalSampleMassG.toStringAsFixed(1)} г • Σn = ${activeSp.totalDropsN} ударов',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          key: ValueKey('sp_${_selectedSpecimenIdx}_dust_m'),
+                          initialValue: activeSp.totalDustMassG != null && activeSp.totalDustMassG! > 0
+                              ? activeSp.totalDustMassG.toString()
+                              : '',
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Масса пыли, г',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onChanged: (v) {
+                            setState(() {
+                              activeSp.totalDustMassG = double.tryParse(v.replaceAll(',', '.'));
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextFormField(
+                          key: ValueKey('sp_${_selectedSpecimenIdx}_dust_l'),
+                          initialValue: activeSp.totalDustHeightMm > 0 ? activeSp.totalDustHeightMm.toString() : '',
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Высота пыли l, мм',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onChanged: (v) {
+                            setState(() {
+                              activeSp.totalDustHeightMm = double.tryParse(v.replaceAll(',', '.')) ?? 0.0;
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  if (activeSp.totalDustHeightMm > 0 && (activeSp.totalDustHeightMm < 20 || activeSp.totalDustHeightMm > 100))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        activeSp.totalDustHeightMm < 20
+                            ? 'Подсказка ГОСТ: столбик пыли < 20 мм — на следующих образцах можно увеличить число ударов.'
+                            : 'Подсказка ГОСТ: столбик пыли > 100 мм — порода мягкая, уменьшите число ударов.',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFFEA580C), fontWeight: FontWeight.w600),
+                      ),
+                    ),
+
+                  if (activeSp.isValid)
+                    Container(
+                      margin: const EdgeInsets.only(top: 10),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(8)),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'По ${activeSp.label}: f = ${activeSp.strengthCoeffF.toStringAsFixed(2)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF059669)),
+                          ),
+                          Text(
+                            'Rc = ${activeSp.estimatedRcMpa(_record.lithotype.softeningFactor, _record.condition == 'w').toStringAsFixed(1)} МПа',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             ),
+          ),
+          const SizedBox(height: 14),
 
-          // Блок 4: Итоговый расчет
+          // Сводный итог по всей пробе (по всем 4 образцам)
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -712,17 +934,17 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'РЕЗУЛЬТАТЫ ПО ГОСТ 21153.1-75',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B), letterSpacing: 0.8),
+                Text(
+                  'СВОДНЫЙ ИТОГ ПО ПРОБЕ (УЧТЕНО ОБРАЗЦОВ: ${_record.validSpecimens.length} ИЗ ${_record.specimens.length})',
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B), letterSpacing: 0.7),
                 ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(
                       child: _metricBox(
-                        'Коэф. крепости f',
-                        f > 0 ? f.toStringAsFixed(2) : '—',
+                        'Средний коэф. f',
+                        avgF > 0 ? avgF.toStringAsFixed(2) : '—',
                         const Color(0xFFEA580C),
                         const Color(0xFFFFF7ED),
                       ),
@@ -730,8 +952,8 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _metricBox(
-                        'Оценка прочности Rc',
-                        rc > 0 ? '${rc.toStringAsFixed(1)} МПа' : '—',
+                        'Средний Rc',
+                        avgRc > 0 ? '${avgRc.toStringAsFixed(1)} МПа' : '—',
                         const Color(0xFF2563EB),
                         const Color(0xFFEFF6FF),
                       ),
@@ -740,14 +962,14 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Классификация: ${_record.strengthCategory}',
+                  'Категория крепости: ${_record.strengthCategory}',
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                 ),
-                if (validCount >= 2)
+                if (_record.validSpecimens.length >= 2)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
-                      'Коэффициент вариации V = ${varPct.toStringAsFixed(1)}% ${varPct > 20 ? "(высокий разброс — рекомендуется добавить 2 навески)" : "(однородность в норме)"}',
+                      'Вариация между образцами V = ${varPct.toStringAsFixed(1)}%',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -765,7 +987,7 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
-                    onPressed: f > 0
+                    onPressed: avgF > 0
                         ? () async {
                             await _save();
                             if (context.mounted) {
@@ -774,94 +996,13 @@ class _ProtodyakonovEditorScreenState extends State<ProtodyakonovEditorScreen> {
                           }
                         : null,
                     icon: const Icon(Icons.table_view, size: 18),
-                    label: const Text('Сохранить и выгрузить в Excel', style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text('Сохранить пробу и выгрузить в Excel', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSubsampleCard(int index) {
-    final s = _record.subsamples[index];
-    final fVal = s.strengthCoeffF;
-
-    return Card(
-      color: Colors.white,
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 11,
-                  backgroundColor: const Color(0xFFFFF7ED),
-                  child: Text('${index + 1}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFEA580C))),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('Навеска #${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                ),
-                if (fVal > 0)
-                  Text(
-                    'f = ${fVal.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF059669)),
-                  ),
-                if (_record.subsamples.length > 1)
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 16, color: Color(0xFF94A3B8)),
-                    onPressed: () => setState(() => _record.subsamples.removeAt(index)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey('m_${index}_${s.massG}'),
-                    initialValue: s.massG > 0 ? s.massG.toString() : '',
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'Масса m (г)', border: OutlineInputBorder(), isDense: true),
-                    onChanged: (v) {
-                      s.massG = double.tryParse(v.replaceAll(',', '.')) ?? s.massG;
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey('n_${index}_${s.dropsN}'),
-                    initialValue: s.dropsN.toString(),
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Удары n', border: OutlineInputBorder(), isDense: true),
-                    onChanged: (v) {
-                      setState(() => s.dropsN = int.tryParse(v.trim()) ?? 5);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    initialValue: s.dustHeightMm > 0 ? s.dustHeightMm.toString() : '',
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'Пыль l (мм)', border: OutlineInputBorder(), isDense: true),
-                    onChanged: (v) {
-                      setState(() => s.dustHeightMm = double.tryParse(v.replaceAll(',', '.')) ?? 0.0);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
