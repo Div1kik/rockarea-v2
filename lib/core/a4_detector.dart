@@ -5,14 +5,12 @@ import 'package:image/image.dart' as img;
 class A4Detector {
   static const double a4PhysicalAreaCm2 = 623.7; // 21.0 x 29.7 см
 
-  /// Обнаружение 4 углов листа А4 через выделение главной связной области бумаги
   static List<Offset> detectA4Corners(img.Image src) {
     const int targetWidth = 360;
     final double scale = targetWidth / src.width;
     final int targetHeight = (src.height * scale).toInt();
     final img.Image thumb = img.copyResize(src, width: targetWidth, height: targetHeight);
 
-    // 1. Адаптивный порог яркости белого листа
     final List<int> lums = [];
     for (int y = 0; y < thumb.height; y += 2) {
       for (int x = 0; x < thumb.width; x += 2) {
@@ -20,9 +18,31 @@ class A4Detector {
       }
     }
     lums.sort();
-    final int paperLumThreshold = math.max(145, lums[(lums.length * 0.72).toInt()] - 28);
+    final int paperLumThreshold = math.max(135, lums[(lums.length * 0.70).toInt()] - 30);
 
-    // 2. Поиск самой крупной связной белой области (сам лист А4), игнорируя мелкие блики по углам стола
+    // Проверяем, не является ли весь кадр уже обрезанным сканом/фото листа А4
+    int brightBorderCount = 0;
+    int totalBorderCount = 0;
+    for (int x = 0; x < targetWidth; x += 4) {
+      if (img.getLuminance(thumb.getPixel(x, 2)) >= paperLumThreshold) brightBorderCount++;
+      if (img.getLuminance(thumb.getPixel(x, targetHeight - 3)) >= paperLumThreshold) brightBorderCount++;
+      totalBorderCount += 2;
+    }
+    for (int y = 0; y < targetHeight; y += 4) {
+      if (img.getLuminance(thumb.getPixel(2, y)) >= paperLumThreshold) brightBorderCount++;
+      if (img.getLuminance(thumb.getPixel(targetWidth - 3, y)) >= paperLumThreshold) brightBorderCount++;
+      totalBorderCount += 2;
+    }
+
+    if (totalBorderCount > 0 && (brightBorderCount / totalBorderCount) > 0.80) {
+      return const [
+        Offset(0.0, 0.0),
+        Offset(1.0, 0.0),
+        Offset(1.0, 1.0),
+        Offset(0.0, 1.0),
+      ];
+    }
+
     final List<List<bool>> visited = List.generate(targetHeight, (_) => List.filled(targetWidth, false));
     List<math.Point<int>> largestComponent = [];
 
@@ -61,14 +81,13 @@ class A4Detector {
 
     if (largestComponent.length < (targetWidth * targetHeight * 0.12)) {
       return const [
-        Offset(0.08, 0.06),
-        Offset(0.92, 0.06),
-        Offset(0.92, 0.94),
-        Offset(0.08, 0.94),
+        Offset(0.0, 0.0),
+        Offset(1.0, 0.0),
+        Offset(1.0, 1.0),
+        Offset(0.0, 1.0),
       ];
     }
 
-    // 3. Поиск 4 углов найденного листа А4
     math.Point<int> tl = largestComponent.first;
     math.Point<int> tr = largestComponent.first;
     math.Point<int> br = largestComponent.first;
