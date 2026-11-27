@@ -9,7 +9,7 @@ class ContourDetector {
     required double normX,
     required double normY,
   }) {
-    const int maxDim = 800;
+    const int maxDim = 820;
     final double scale = (image.width > image.height)
         ? maxDim / image.width
         : maxDim / image.height;
@@ -50,8 +50,8 @@ class ContourDetector {
       }
     }
 
-    final int startX = (normX * tw).toInt().clamp(3, tw - 4);
-    final int startY = (normY * th).toInt().clamp(3, th - 4);
+    final int startX = (normX * tw).toInt().clamp(4, tw - 5);
+    final int startY = (normY * th).toInt().clamp(4, th - 5);
 
     // 1. Локальная оценка яркости и цветности бумаги вокруг точки касания
     final List<double> paperLums = [];
@@ -88,7 +88,7 @@ class ContourDetector {
         (centerChroma - localPaperChroma).abs() < 12.0;
 
     if (isPaperInside) {
-      return _extractHandDrawnContour(
+      return _extractHandDrawnMultiPass(
         smoothLum: smoothLum,
         tw: tw,
         th: th,
@@ -156,8 +156,8 @@ class ContourDetector {
     return _traceAndSmoothMask(mask, tw, th, minX, minY, maxX, maxY, normX, normY, isHandDrawn: false);
   }
 
-  /// Режим 2: Заливка замкнутого контура карандаша/ручки без утечек и без занижения площади
-  static List<Offset> _extractHandDrawnContour({
+  /// Многоуровневая эскалация чувствительности (3 прохода), чтобы поймать даже очень тонкий карандаш
+  static List<Offset> _extractHandDrawnMultiPass({
     required List<List<double>> smoothLum,
     required int tw,
     required int th,
@@ -167,55 +167,93 @@ class ContourDetector {
     required double normX,
     required double normY,
   }) {
-    // 1. Поиск линий карандаша (окно +-5 px, порог 6.5 ловит даже бледный карандаш)
-    final List<List<bool>> inkWall = List.generate(th, (_) => List.filled(tw, false));
+    // Предварительно считаем карту перепадов яркости (8 направлений + градиент Собеля)
+    final List<List<double>> edgeStrength = List.generate(th, (_) => List.filled(tw, 0.0));
 
     for (int y = 5; y < th - 5; y++) {
       for (int x = 5; x < tw - 5; x++) {
         final double lum = smoothLum[y][x];
-        final double lLeft = smoothLum[y][x - 5];
-        final double lRight = smoothLum[y][x + 5];
-        final double lUp = smoothLum[y - 5][x];
-        final double lDown = smoothLum[y + 5][x];
-
-        final double localBg = math.max(math.max(lLeft, lRight), math.max(lUp, lDown));
-        if ((localBg - lum) > 6.5 || lum < localPaperLum - 16.0) {
-          inkWall[y][x] = true;
+        // Максимальный светлый фон в радиусе 5 px по 8 направлениям
+        double localBg = lum;
+        for (int dy = -5; dy <= 5; dy += 5) {
+          for (int dx = -5; dx <= 5; dx += 5) {
+            if (dx == 0 && dy == 0) continue;
+            final v = smoothLum[y + dy][x + dx];
+            if (v > localBg) localBg = v;
+          }
         }
+        final double drop = localBg - lum;
+        final double globalDrop = (localPaperLum - lum) * 0.45;
+        edgeStrength[y][x] = math.max(drop, globalDrop);
       }
     }
 
-    // 2. Закрытие микроразрывов штриха (квадрат 3x3 -> перекрывает зазоры до 3 px)
+    // 3 попытки от нормальной линии к сверхтонкому карандашу
+    final List<double> thresholds = [6.5, 4.6, 3.3];
+    final List<int> dilateRadii = [1, 1, 2];
+
+    for (int pass = 0; pass < thresholds.length; pass++) {
+      final result = _tryFloodHandDrawn(
+        edgeStrength: edgeStrength,
+        tw: tw,
+        th: th,
+        startX: startX,
+        startY: startY,
+        edgeThreshold: thresholds[pass],
+        wallRadius: dilateRadii[pass],
+        normX: normX,
+        normY: normY,
+      );
+      if (result != null) {
+        return result;
+      }
+    }
+
+    return _fallbackBox(normX, normY);
+  }
+
+  static List<Offset>? _tryFloodHandDrawn({
+    required List<List<double>> edgeStrength,
+    required int tw,
+    required int th,
+    required int startX,
+    required int startY,
+    required double edgeThreshold,
+    required int wallRadius,
+    required double normX,
+    required double normY,
+  }) {
     final List<List<bool>> thickWall = List.generate(th, (_) => List.filled(tw, false));
-    for (int y = 2; y < th - 2; y++) {
-      for (int x = 2; x < tw - 2; x++) {
-        if (inkWall[y][x]) {
-          for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
-              thickWall[y + dy][x + dx] = true;
+    for (int y = 3; y < th - 3; y++) {
+      for (int x = 3; x < tw - 3; x++) {
+        if (edgeStrength[y][x] > edgeThreshold) {
+          for (int dy = -wallRadius; dy <= wallRadius; dy++) {
+            for (int dx = -wallRadius; dx <= wallRadius; dx++) {
+              if (dx.abs() + dy.abs() <= wallRadius + 1) {
+                thickWall[y + dy][x + dx] = true;
+              }
             }
           }
         }
       }
     }
 
-    // Очищаем точку старта (если пользователь тапнул прямо по цифре внутри контура)
-    for (int dy = -6; dy <= 6; dy++) {
-      for (int dx = -6; dx <= 6; dx++) {
+    // Очищаем точку старта (на случай тапа прямо на цифру внутри контура)
+    for (int dy = -5; dy <= 5; dy++) {
+      for (int dx = -5; dx <= 5; dx++) {
         final sx = (startX + dx).clamp(2, tw - 3);
         final sy = (startY + dy).clamp(2, th - 3);
         thickWall[sy][sx] = false;
       }
     }
 
-    // 3. Заливка (BFS) от точки касания до границ карандаша
     final List<List<bool>> filled = List.generate(th, (_) => List.filled(tw, false));
     final List<math.Point<int>> queue = [math.Point(startX, startY)];
     filled[startY][startX] = true;
 
     int minX = startX, maxX = startX, minY = startY, maxY = startY;
     int count = 0;
-    final int maxAllowedPixels = (tw * th * 0.30).toInt();
+    final int maxAllowedPixels = (tw * th * 0.25).toInt();
 
     const dirsX = [1, -1, 0, 0];
     const dirsY = [0, 0, 1, -1];
@@ -224,7 +262,7 @@ class ContourDetector {
       final curr = queue.removeLast();
       count++;
       if (count > maxAllowedPixels) {
-        return _fallbackBox(normX, normY);
+        return null; // Протечка наружу — переходим к следующему более строгому проходу
       }
 
       if (curr.x < minX) minX = curr.x;
@@ -235,7 +273,7 @@ class ContourDetector {
       for (int i = 0; i < 4; i++) {
         final nx = curr.x + dirsX[i];
         final ny = curr.y + dirsY[i];
-        if (nx <= 2 || nx >= tw - 3 || ny <= 2 || ny >= th - 3) continue;
+        if (nx <= 3 || nx >= tw - 4 || ny <= 3 || ny >= th - 4) continue;
         if (!filled[ny][nx] && !thickWall[ny][nx]) {
           filled[ny][nx] = true;
           queue.add(math.Point(nx, ny));
@@ -243,13 +281,13 @@ class ContourDetector {
       }
     }
 
-    if (count < 40) return _fallbackBox(normX, normY);
+    if (count < 45) return null;
 
-    // 4. Заполняем все внутренние "острова" (цифры внутри контура)
-    final int bx0 = math.max(2, minX - 6);
-    final int by0 = math.max(2, minY - 6);
-    final int bx1 = math.min(tw - 3, maxX + 6);
-    final int by1 = math.min(th - 3, maxY + 6);
+    // Заполняем все внутренние "острова" (цифры и пометки внутри контура)
+    final int bx0 = math.max(2, minX - 5);
+    final int by0 = math.max(2, minY - 5);
+    final int bx1 = math.min(tw - 3, maxX + 5);
+    final int by1 = math.min(th - 3, maxY + 5);
 
     final List<List<bool>> outside = List.generate(th, (_) => List.filled(tw, false));
     final List<math.Point<int>> outQ = [math.Point(bx0, by0)];
@@ -268,16 +306,19 @@ class ContourDetector {
       }
     }
 
-    // 5. Компенсируем толщину стенки (+2.5 px наружу), чтобы полигон шел строго по центру линии карандаша
+    // Точная компенсация толщины стенки (крест +-1 px + диагональ), чтобы лечь ровно по оси карандаша
     final List<List<bool>> solidMask = List.generate(th, (_) => List.filled(tw, false));
+    final int compRadius = wallRadius;
     for (int y = by0; y <= by1; y++) {
       for (int x = bx0; x <= bx1; x++) {
         if (!outside[y][x]) {
-          for (int dy = -2; dy <= 2; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
-              final py = (y + dy).clamp(1, th - 2);
-              final px = (x + dx).clamp(1, tw - 2);
-              solidMask[py][px] = true;
+          for (int dy = -compRadius; dy <= compRadius; dy++) {
+            for (int dx = -compRadius; dx <= compRadius; dx++) {
+              if (dx.abs() + dy.abs() <= compRadius + 1) {
+                final py = (y + dy).clamp(1, th - 2);
+                final px = (x + dx).clamp(1, tw - 2);
+                solidMask[py][px] = true;
+              }
             }
           }
         }
@@ -360,7 +401,7 @@ class ContourDetector {
 
     if (rawContour.length < 6) return _fallbackBox(normX, normY);
 
-    final simplified = _rdpSimplify(rawContour, isHandDrawn ? 2.6 : 3.2);
+    final simplified = _rdpSimplify(rawContour, isHandDrawn ? 2.5 : 3.2);
     if (simplified.length < 4) return _fallbackBox(normX, normY);
 
     final smoothed = _chaikinSmooth(simplified);
