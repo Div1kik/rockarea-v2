@@ -5,32 +5,31 @@ import 'package:image/image.dart' as img;
 class A4Detector {
   static const double a4PhysicalAreaCm2 = 623.7; // 21.0 x 29.7 см
 
+  /// Обнаружение 4 углов белого листа А4 с отсечением теплого оттенка деревянного стола
   static List<Offset> detectA4Corners(img.Image src) {
     const int targetWidth = 360;
     final double scale = targetWidth / src.width;
     final int targetHeight = (src.height * scale).toInt();
     final img.Image thumb = img.copyResize(src, width: targetWidth, height: targetHeight);
 
-    final List<int> lums = [];
-    for (int y = 0; y < thumb.height; y += 2) {
-      for (int x = 0; x < thumb.width; x += 2) {
-        lums.add(img.getLuminance(thumb.getPixel(x, y)).toInt());
-      }
+    bool isPaperPixel(img.Pixel p) {
+      final double lum = img.getLuminance(p).toDouble();
+      // Белая/серая бумага в тени нейтральна по цвету (R близко к B), а бежевый стол имеет сильный завал в красный/желтый (R - B > 22)
+      final double warmTint = (p.r - p.b).toDouble();
+      return lum >= 115.0 && warmTint < 20.0;
     }
-    lums.sort();
-    final int paperLumThreshold = math.max(135, lums[(lums.length * 0.70).toInt()] - 30);
 
     // Проверяем, не является ли весь кадр уже обрезанным сканом/фото листа А4
     int brightBorderCount = 0;
     int totalBorderCount = 0;
     for (int x = 0; x < targetWidth; x += 4) {
-      if (img.getLuminance(thumb.getPixel(x, 2)) >= paperLumThreshold) brightBorderCount++;
-      if (img.getLuminance(thumb.getPixel(x, targetHeight - 3)) >= paperLumThreshold) brightBorderCount++;
+      if (isPaperPixel(thumb.getPixel(x, 2))) brightBorderCount++;
+      if (isPaperPixel(thumb.getPixel(x, targetHeight - 3))) brightBorderCount++;
       totalBorderCount += 2;
     }
     for (int y = 0; y < targetHeight; y += 4) {
-      if (img.getLuminance(thumb.getPixel(2, y)) >= paperLumThreshold) brightBorderCount++;
-      if (img.getLuminance(thumb.getPixel(targetWidth - 3, y)) >= paperLumThreshold) brightBorderCount++;
+      if (isPaperPixel(thumb.getPixel(2, y))) brightBorderCount++;
+      if (isPaperPixel(thumb.getPixel(targetWidth - 3, y))) brightBorderCount++;
       totalBorderCount += 2;
     }
 
@@ -52,8 +51,7 @@ class A4Detector {
     for (int y = 4; y < targetHeight - 4; y += 3) {
       for (int x = 4; x < targetWidth - 4; x += 3) {
         if (visited[y][x]) continue;
-        final lum = img.getLuminance(thumb.getPixel(x, y));
-        if (lum < paperLumThreshold) continue;
+        if (!isPaperPixel(thumb.getPixel(x, y))) continue;
 
         final List<math.Point<int>> comp = [];
         final List<math.Point<int>> q = [math.Point(x, y)];
@@ -66,7 +64,7 @@ class A4Detector {
             final nx = curr.x + dx[i];
             final ny = curr.y + dy[i];
             if (nx < 2 || nx >= targetWidth - 2 || ny < 2 || ny >= targetHeight - 2) continue;
-            if (!visited[ny][nx] && img.getLuminance(thumb.getPixel(nx, ny)) >= paperLumThreshold) {
+            if (!visited[ny][nx] && isPaperPixel(thumb.getPixel(nx, ny))) {
               visited[ny][nx] = true;
               q.add(math.Point(nx, ny));
             }
@@ -81,10 +79,10 @@ class A4Detector {
 
     if (largestComponent.length < (targetWidth * targetHeight * 0.12)) {
       return const [
-        Offset(0.0, 0.0),
-        Offset(1.0, 0.0),
-        Offset(1.0, 1.0),
-        Offset(0.0, 1.0),
+        Offset(0.08, 0.06),
+        Offset(0.92, 0.06),
+        Offset(0.92, 0.94),
+        Offset(0.08, 0.94),
       ];
     }
 
