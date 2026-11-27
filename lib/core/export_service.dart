@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'archive_service.dart';
+import '../features/deformation/lithotype_db.dart';
 import '../features/strength/strength_calculator_sheet.dart';
 
 class ExportService {
@@ -13,7 +14,6 @@ class ExportService {
     required String content,
   }) async {
     File file;
-    // Директива sep=; сообщает Microsoft Excel на ПК принудительно делить колонки по точке с запятой
     final formattedContent = 'sep=;\r\n$content';
     final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(formattedContent)];
 
@@ -71,18 +71,23 @@ class ExportService {
     }
   }
 
-  /// 2. Результаты испытаний ГОСТ 24941-81
+  /// 2. Результаты испытаний ГОСТ 24941-81 или комбинированный пересчет (Литотип + sigma_p)
   static Future<void> exportGostProtocol({
     required BuildContext context,
     required String seriesId,
     required List<SampleStrengthData> samples,
     required double avgTensile,
     required double avgComp,
+    bool useLithotypeConversion = false,
+    LithotypeProfile? lithotypeProfile,
     bool shareImmediately = false,
   }) async {
     final sb = StringBuffer();
 
-    // 1-я строка: Высокая чистая шапка (без дефисов, переносы строк внутри кавычек)
+    final String methodHeader = useLithotypeConversion && lithotypeProfile != null
+        ? '"Предел прочности на сжатие\n(Литотип + σp), МПа"'
+        : '"Предел прочности на сжатие\nпо ГОСТ 24941-81, МПа"';
+
     sb.write(
       '№;'
       '"Шифр\nпробы";;;'
@@ -97,15 +102,15 @@ class ExportService {
       '"Среднее значение\nрастяжения, МПа";'
       '"Коэф.\nПересчета";'
       '"Шифр Коэф.\nПересчета";'
-      '"Предел прочности на сжатие\nпо ГОСТ 24941-81, МПа";'
-      '"Среднее значение\nсжатия, МПа"\r\n'
+      '$methodHeader;'
+      '"Среднее значение\nсжатия, МПа"\r\n',
     );
 
-    // 2-я строка: Номера граф
     sb.write('1;2;;;3;4;5;6;;7;8;9;10;11;;;12;13\r\n');
 
-    final int startRow = 4; // С учетом служебной строки sep=; данные начинаются с 4 строки
+    final int startRow = 4;
     final int endRow = startRow + samples.length - 1;
+    final double kLit = lithotypeProfile?.kConversionBase ?? 16.0;
 
     for (int i = 0; i < samples.length; i++) {
       final s = samples[i];
@@ -118,7 +123,9 @@ class ExportService {
       final colE = s.borehole;
       final colF = s.interval;
       final colG = s.condition;
-      final colH = s.lithology;
+      final colH = (useLithotypeConversion && lithotypeProfile != null)
+          ? lithotypeProfile.name.split('/').first.trim()
+          : s.lithology;
       final colI = '';
 
       final colJ = s.areaCm2 > 0 ? s.areaCm2.toStringAsFixed(2) : '0.00';
@@ -127,8 +134,18 @@ class ExportService {
       final colL = '"=ROUND(0.5076*(J$r^0.2506); 2)"';
       final colM = '"=IF(J$r>0; ROUND((7.5*K$r*L$r)/J$r; 2); 0)"';
       final colN = (i == 0) ? '"=ROUND(AVERAGE(M$startRow:M$endRow); 2)"' : '';
-      final colO = '"=IF(M$r<=0; """"; IF(M$r<1; 12; IF(M$r<5; 16; 20)))"';
-      final colP = '';
+
+      final String colO;
+      final String colP;
+      if (useLithotypeConversion && lithotypeProfile != null) {
+        final kLitStr = kLit.toStringAsFixed(1).replaceAll('.', ',');
+        colO = '"=IF(M$r<=0; """"; ROUND($kLitStr*MIN(1,05; 0,65+0,22*LN(M$r+1)); 2))"';
+        colP = '"Kлит=${kLit.toStringAsFixed(1)}"';
+      } else {
+        colO = '"=IF(M$r<=0; """"; IF(M$r<1; 12; IF(M$r<5; 16; 20)))"';
+        colP = 'ГОСТ 24941-81';
+      }
+
       final colQ = '"=IF(O$r<>""""; ROUND(M$r*O$r; 1); """")"';
       final colR = (i == 0) ? '"=IF(COUNT(Q$startRow:Q$endRow)>0; ROUND(AVERAGE(Q$startRow:Q$endRow); 1); """")"' : '';
 
@@ -136,7 +153,8 @@ class ExportService {
     }
 
     final safeId = seriesId.replaceAll(RegExp(r'[^\w\d]'), '_');
-    final filename = 'Результаты_испытаний_${safeId}.csv';
+    final suffix = useLithotypeConversion ? '_Литотип' : '';
+    final filename = 'Результаты_испытаний_${safeId}$suffix.csv';
     final savedFile = await _writeCsvFile(filename: filename, content: sb.toString());
 
     if (context.mounted) {
