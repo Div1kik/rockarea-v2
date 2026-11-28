@@ -567,7 +567,7 @@ class _DeformationEditorScreenState extends State<DeformationEditorScreen> {
   late TextEditingController _rhoDCtrl;
   late TextEditingController _rhoSCtrl;
   bool _showLvdtGuide = false;
-  bool _manualTwoChannels = false; // false = ввод среднего с табло EVOTest, true = раздельный ввод Канала 1 и Канала 2
+  bool _manualTwoChannels = false;
 
   @override
   void initState() {
@@ -713,21 +713,32 @@ class _DeformationEditorScreenState extends State<DeformationEditorScreen> {
                   Row(
                     children: [
                       Expanded(
-                        flex: 2,
+                        flex: 3,
                         child: TextField(
                           controller: _cipherCtrl,
-                          decoration: const InputDecoration(labelText: 'Шифр пробы', border: OutlineInputBorder(), isDense: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Шифр пробы',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
+                        flex: 2,
                         child: DropdownButtonFormField<String>(
                           value: _record.condition,
-                          decoration: const InputDecoration(labelText: 'Сост.', border: OutlineInputBorder(), isDense: true),
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Сост.',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
                           items: const [
-                            DropdownMenuItem(value: 'n', child: Text('n (ест.)')),
-                            DropdownMenuItem(value: 'w', child: Text('w (вод.)')),
-                            DropdownMenuItem(value: 'h', child: Text('h (сух.)')),
+                            DropdownMenuItem(value: 'n', child: Text('n (ест.)', overflow: TextOverflow.ellipsis)),
+                            DropdownMenuItem(value: 'w', child: Text('w (вод.)', overflow: TextOverflow.ellipsis)),
+                            DropdownMenuItem(value: 'h', child: Text('h (сух.)', overflow: TextOverflow.ellipsis)),
                           ],
                           onChanged: (v) {
                             if (v != null) setState(() => _record.condition = v);
@@ -746,7 +757,10 @@ class _DeformationEditorScreenState extends State<DeformationEditorScreen> {
                       isDense: true,
                     ),
                     items: LithotypeDatabase.profiles
-                        .map((p) => DropdownMenuItem(value: p.id, child: Text(p.name, style: const TextStyle(fontSize: 13))))
+                        .map((p) => DropdownMenuItem(
+                              value: p.id,
+                              child: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                            ))
                         .toList(),
                     onChanged: (val) {
                       if (val != null) setState(() => _record.lithotypeId = val);
@@ -785,9 +799,8 @@ class _DeformationEditorScreenState extends State<DeformationEditorScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(14),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Переключатель: 2 датчика LVDT vs Ход траверсы
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
@@ -808,20 +821,20 @@ class _DeformationEditorScreenState extends State<DeformationEditorScreen> {
                     if (_record.useDualLvdtSensors)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [
-                            ChoiceChip(
-                              selected: !_manualTwoChannels,
-                              label: const Text('Среднее с EVOTest', style: TextStyle(fontSize: 11)),
-                              onSelected: (_) => setState(() => _manualTwoChannels = false),
+                        child: SegmentedButton<bool>(
+                          showSelectedIcon: false,
+                          segments: const [
+                            ButtonSegment<bool>(
+                              value: false,
+                              label: Text('Среднее EVOTest', style: TextStyle(fontSize: 11)),
                             ),
-                            const SizedBox(width: 8),
-                            ChoiceChip(
-                              selected: _manualTwoChannels,
-                              label: const Text('Ввод Канал 1 и Канал 2', style: TextStyle(fontSize: 11)),
-                              onSelected: (_) => setState(() => _manualTwoChannels = true),
+                            ButtonSegment<bool>(
+                              value: true,
+                              label: Text('Кан. 1 и Кан. 2', style: TextStyle(fontSize: 11)),
                             ),
                           ],
+                          selected: {_manualTwoChannels},
+                          onSelectionChanged: (set) => setState(() => _manualTwoChannels = set.first),
                         ),
                       ),
                     const Divider(height: 16),
@@ -929,7 +942,7 @@ class _DeformationEditorScreenState extends State<DeformationEditorScreen> {
                             onChanged: (_) => setState(() {}),
                             decoration: InputDecoration(
                               labelText: 'Плотн. частиц ρs (${_record.lithotype.rhoSDefault})',
-                              border: const OutlineInputBorder(),
+                              border: OutlineInputBorder(),
                               isDense: true,
                             ),
                           ),
