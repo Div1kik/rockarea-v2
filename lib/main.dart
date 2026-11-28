@@ -1,10 +1,11 @@
-import 'features/protodyakonov/protodyakonov_screen.dart';
-import 'features/deformation/deformation_screen.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'features/archive/archive_screen.dart';
 import 'features/calculator/circle_calculator_screen.dart';
+import 'features/cylinders/cylinder_batch_screen.dart';
+import 'features/deformation/deformation_screen.dart';
+import 'features/protodyakonov/protodyakonov_screen.dart';
 import 'features/segmentation/vector_polygon_editor.dart';
 
 void main() {
@@ -198,7 +199,7 @@ class MainMenuScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          
+
           // Карточка 3: Деформационные характеристики (Инденторы / Протодьяконов / Пористость)
           Card(
             color: Colors.white,
@@ -239,7 +240,7 @@ class MainMenuScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          
+
           // Карточка 4: Метод толчения по М. М. Протодьяконову (ГОСТ 21153.1-75)
           Card(
             color: Colors.white,
@@ -281,9 +282,48 @@ class MainMenuScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
+          // Карточка 5: Поточный журнал цилиндров (ГОСТ 21153.2 / 21153.3 / 21153.7)
+          Card(
+            color: Colors.white,
+            elevation: 1.5,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CylinderBatchModuleScreen()),
+                );
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: Color(0xFFEFF6FF),
+                      child: Icon(Icons.view_column_outlined, color: Color(0xFF2563EB), size: 22),
+                    ),
+                    SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Журнал цилиндров (ГОСТ 21153)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A))),
+                          SizedBox(height: 3),
+                          Text('Обмер (d, h), влажность, плотность, ультразвук, сжатие и растяжение', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
 
-
-          // Карточка 5: Задел на будущее
+          // Карточка 6: Задел на будущее
           Card(
             color: const Color(0xFFF1F5F9),
             elevation: 0,
